@@ -1010,7 +1010,7 @@ const CloudSync = {
   // 所有需要同步的数据表
   SYNC_TABLES: ['dailySales','expenses','incomes','purchases','suppliers','inventory',
     'employees','foodSafety','equipment','contracts','licenses','complaints','badReviews',
-    'cashflow','products','settings'],
+    'cashflow','products','settings','fixedExpenses'],
 
   _token: null,
   _syncing: false,
@@ -1639,7 +1639,7 @@ Pages._saveCloudToken = function() {
 
 Pages._clearAllData = function() {
   UI.confirm('确定清空所有数据吗？此操作不可恢复！', () => {
-    const tables = ['dailySales','expenses','incomes','purchases','suppliers','inventory','employees','foodSafety','equipment','contracts','licenses','complaints','badReviews','cashflow','settings'];
+    const tables = ['dailySales','expenses','incomes','purchases','suppliers','inventory','employees','foodSafety','equipment','contracts','licenses','complaints','badReviews','cashflow','settings','fixedExpenses'];
     tables.forEach(t => localStorage.removeItem(DB._prefix + t));
     UI.closeModal();
     toast('所有数据已清空', 'success');
@@ -2915,14 +2915,61 @@ Pages._deleteDailySale = function(id) {
 /* ========== 每日支出 ========== */
 Pages.expenses = function(container) {
   const expenses = DB.get('expenses', []);
+  const fixedExpenses = DB.get('fixedExpenses', []);
   expenses.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   const categories = ['采购','工资','水电','房租','物业','燃气','维修','设备','平台推广','广告','交通','办公用品','其他'];
 
   let html = `
     <div class="stat-grid" id="expenseStats"></div>
+
+    <!-- 固定支出 -->
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-header">
+        <div class="card-title">🏠 固定支出（自动分摊到每天）</div>
+        <button class="btn btn-primary" onclick="Pages._editFixedExpense()">+ 添加固定支出</button>
+      </div>
+      <div class="text-muted text-sm" style="padding:0 0 8px;color:#F77F00;">
+        💡 如房租按年交、保险按年交等，设置后会自动算出每天分摊金额，计入每日支出统计
+      </div>
+  `;
+
+  if (fixedExpenses.length === 0) {
+    html += `<div class="empty-state" style="padding:16px;"><div class="empty-icon">📭</div><div class="empty-text">暂无固定支出，点击右上角添加</div></div>`;
+  } else {
+    html += `<div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>名称</th><th>总金额</th><th>起始日期</th><th>结束日期</th><th>天数</th><th>每天分摊</th><th>状态</th><th>操作</th>
+    </tr></thead><tbody>`;
+    fixedExpenses.forEach(f => {
+      const days = Utils.daysBetween(f.startDate, f.endDate) + 1;
+      const dailyAmount = days > 0 ? (f.totalAmount / days) : 0;
+      const today = Utils.today();
+      let status = '', badge = 'badge-success';
+      if (today < f.startDate) { status = '未开始'; badge = 'badge-info'; }
+      else if (today > f.endDate) { status = '已结束'; badge = 'badge-default'; }
+      else { status = '生效中'; badge = 'badge-success'; }
+      html += `<tr>
+        <td class="font-bold">${f.name || '-'}</td>
+        <td class="text-danger font-bold">¥${Utils.money(f.totalAmount || 0)}</td>
+        <td>${f.startDate || '-'}</td>
+        <td>${f.endDate || '-'}</td>
+        <td>${days} 天</td>
+        <td class="text-primary font-bold">¥${Utils.money(dailyAmount)}/天</td>
+        <td><span class="badge ${badge}">${status}</span></td>
+        <td>
+          <button class="btn btn-default btn-sm" onclick="Pages._editFixedExpense(${f.id})">编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="Pages._deleteFixedExpense(${f.id})">删除</button>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+
+  // 每日支出记录
+  html += `
     <div class="card">
       <div class="card-header">
-        <div class="card-title">💸 每日支出</div>
+        <div class="card-title">💸 每日支出记录</div>
         <button class="btn btn-primary" onclick="Pages._editExpense()">+ 记录支出</button>
       </div>
       <div class="search-bar">
@@ -2966,15 +3013,111 @@ Pages.expenses = function(container) {
   html += '</div>';
   container.innerHTML = html;
 
-  // 渲染统计
+  // 渲染统计（含固定支出分摊）
   const monthExp = expenses.filter(e => Utils.isThisMonth(e.date));
   const monthTotal = monthExp.reduce((s, e) => s + (e.amount || 0), 0);
   const todayTotal = expenses.filter(e => Utils.isToday(e.date)).reduce((s, e) => s + (e.amount || 0), 0);
+
+  // 计算今日固定支出分摊
+  const today = Utils.today();
+  let todayFixedDaily = 0;
+  fixedExpenses.forEach(f => {
+    if (today >= f.startDate && today <= f.endDate) {
+      const days = Utils.daysBetween(f.startDate, f.endDate) + 1;
+      todayFixedDaily += days > 0 ? (f.totalAmount / days) : 0;
+    }
+  });
+
+  // 本月固定支出分摊
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+  const monthEnd = Utils.today();
+  let monthFixedTotal = 0;
+  fixedExpenses.forEach(f => {
+    // 计算与本月的重叠天数
+    const overlapStart = f.startDate > monthStart ? f.startDate : monthStart;
+    const overlapEnd = f.endDate < monthEnd ? f.endDate : monthEnd;
+    if (overlapStart <= overlapEnd) {
+      const overlapDays = Utils.daysBetween(overlapStart, overlapEnd) + 1;
+      const totalDays = Utils.daysBetween(f.startDate, f.endDate) + 1;
+      monthFixedTotal += totalDays > 0 ? (f.totalAmount / totalDays * overlapDays) : 0;
+    }
+  });
+
   document.getElementById('expenseStats').innerHTML = `
-    <div class="stat-card danger"><div class="stat-icon">💸</div><div class="stat-label">今日支出</div><div class="stat-value">¥${Utils.money(todayTotal)}</div></div>
-    <div class="stat-card warning"><div class="stat-icon">📆</div><div class="stat-label">本月支出</div><div class="stat-value">¥${Utils.money(monthTotal)}</div></div>
-    <div class="stat-card info"><div class="stat-icon">📊</div><div class="stat-label">支出记录</div><div class="stat-value">${filtered.length}<small> 笔</small></div></div>
+    <div class="stat-card danger"><div class="stat-icon">💸</div><div class="stat-label">今日实际支出</div><div class="stat-value">¥${Utils.money(todayTotal)}</div></div>
+    <div class="stat-card warning"><div class="stat-icon">🏠</div><div class="stat-label">今日固定分摊</div><div class="stat-value">¥${Utils.money(todayFixedDaily)}</div></div>
+    <div class="stat-card info"><div class="stat-icon">📊</div><div class="stat-label">今日总支出</div><div class="stat-value">¥${Utils.money(todayTotal + todayFixedDaily)}</div></div>
+    <div class="stat-card primary"><div class="stat-icon">📆</div><div class="stat-label">本月总支出</div><div class="stat-value">¥${Utils.money(monthTotal + monthFixedTotal)}</div></div>
   `;
+};
+
+// 固定支出编辑
+Pages._editFixedExpense = function(id) {
+  const fe = id ? DB.findById('fixedExpenses', id) : {};
+  const body = `
+    ${UI.field('名称', 'name', 'text', fe.name || '', 'required placeholder="如：全年房租"')}
+    ${UI.field('总金额(元)', 'totalAmount', 'number', fe.totalAmount || '', 'required step="0.01"')}
+    <div class="form-row">
+      ${UI.field('起始日期', 'startDate', 'date', fe.startDate || Utils.today(), 'required')}
+      ${UI.field('结束日期', 'endDate', 'date', fe.endDate || Utils.today(), 'required')}
+    </div>
+    <div class="form-group">
+      <label>备注</label>
+      <textarea class="form-control" name="remark" placeholder="如：2026年1月1日至2026年12月31日房租">${fe.remark || ''}</textarea>
+    </div>
+    <div id="fixedExpPreview" style="padding:12px;background:#F8F9FA;border-radius:8px;font-size:13px;color:var(--text-muted);"></div>
+  `;
+  const footer = `<button class="btn btn-default" onclick="UI.closeModal()">取消</button><button class="btn btn-primary" onclick="Pages._saveFixedExpense(${id || 'null'})">保存</button>`;
+  UI.modal(id ? '编辑固定支出' : '添加固定支出', body, footer);
+
+  // 实时预览每天分摊金额
+  const updatePreview = () => {
+    const name = document.querySelector('[name="name"]')?.value || '';
+    const amount = parseFloat(document.querySelector('[name="totalAmount"]')?.value) || 0;
+    const start = document.querySelector('[name="startDate"]')?.value || '';
+    const end = document.querySelector('[name="endDate"]')?.value || '';
+    const preview = document.getElementById('fixedExpPreview');
+    if (amount > 0 && start && end) {
+      const days = Utils.daysBetween(start, end) + 1;
+      if (days > 0) {
+        const daily = amount / days;
+        const monthly = daily * 30;
+        preview.innerHTML = `📊 <strong>${name || '该项'}</strong>：共 ${days} 天<br>💰 每天分摊：<strong style="color:var(--primary)">¥${Utils.money(daily)}</strong><br>📆 每月约：<strong>¥${Utils.money(monthly)}</strong>`;
+      } else {
+        preview.innerHTML = '⚠️ 结束日期必须晚于起始日期';
+      }
+    } else {
+      preview.innerHTML = '💡 填写金额和日期后自动计算每天分摊';
+    }
+  };
+  document.querySelector('[name="name"]')?.addEventListener('input', updatePreview);
+  document.querySelector('[name="totalAmount"]')?.addEventListener('input', updatePreview);
+  document.querySelector('[name="startDate"]')?.addEventListener('change', updatePreview);
+  document.querySelector('[name="endDate"]')?.addEventListener('change', updatePreview);
+  updatePreview();
+};
+
+Pages._saveFixedExpense = function(id) {
+  const form = document.querySelector('.modal-body');
+  const data = {};
+  form.querySelectorAll('[name]').forEach(el => data[el.name] = el.value);
+  if (!data.name) { toast('请填写名称', 'error'); return; }
+  if (!data.totalAmount || parseFloat(data.totalAmount) <= 0) { toast('请填写金额', 'error'); return; }
+  if (!data.startDate || !data.endDate) { toast('请选择日期', 'error'); return; }
+  if (data.startDate > data.endDate) { toast('结束日期必须晚于起始日期', 'error'); return; }
+  if (id) { DB.update('fixedExpenses', id, data); toast('固定支出已更新', 'success'); }
+  else { DB.add('fixedExpenses', data); toast('固定支出已添加', 'success'); }
+  UI.closeModal();
+  Pages.expenses(document.getElementById('content'));
+};
+
+Pages._deleteFixedExpense = function(id) {
+  UI.confirm('确定删除这条固定支出吗？', () => {
+    DB.remove('fixedExpenses', id);
+    toast('已删除', 'success');
+    Pages.expenses(document.getElementById('content'));
+  });
 };
 
 Pages._filterExpense = function(val) { document.getElementById('content').dataset.expCat = val; Pages.expenses(document.getElementById('content')); };
@@ -3538,21 +3681,43 @@ Pages._printReport = function(title) {
 /* ========== 食品进货台账 ========== */
 Pages.purchases = function(container) {
   let purchases = DB.get('purchases', []);
-  const suppliers = DB.get('suppliers', []);
 
-  // 过滤
-  const searchKey = container.dataset.search || '';
-  const filterCat = container.dataset.filterCat || '';
+  let html = `
+    <div class="time-tabs" style="margin-bottom:16px;">
+      <div class="time-tab active" onclick="Pages._purchaseTab('daily', this)">📋 日台账</div>
+      <div class="time-tab" onclick="Pages._purchaseTab('week', this)">📊 周报</div>
+      <div class="time-tab" onclick="Pages._purchaseTab('month', this)">📅 月报</div>
+      <div class="time-tab" onclick="Pages._purchaseTab('year', this)">📆 年报</div>
+    </div>
+    <div id="purchaseReportArea"></div>
+  `;
+  container.innerHTML = html;
+  Pages._purchaseRenderDaily(purchases);
+};
+
+// Tab 切换
+Pages._purchaseTab = function(mode, el) {
+  document.querySelectorAll('.time-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const purchases = DB.get('purchases', []);
+  if (mode === 'daily') {
+    Pages._purchaseRenderDaily(purchases);
+  } else {
+    Pages._purchaseRenderReport(purchases, mode);
+  }
+};
+
+// 日台账
+Pages._purchaseRenderDaily = function(purchases) {
+  const area = document.getElementById('purchaseReportArea');
+  const categories = ['花小小','快驴'];
+  const searchKey = area.dataset.search || '';
+  const filterCat = area.dataset.filterCat || '';
   let filtered = purchases;
   if (searchKey) filtered = filtered.filter(p => p.name?.includes(searchKey) || p.supplier?.includes(searchKey));
   if (filterCat) filtered = filtered.filter(p => p.category === filterCat);
-
-  // 按日期倒序
   filtered.sort((a, b) => (b.purchaseDate || '').localeCompare(a.purchaseDate || ''));
 
-  const categories = ['肉类','蔬菜','调料','饮料','米粉','包装盒','餐具','耗材','其他'];
-
-  // 统计
   const totalAmount = filtered.reduce((s, p) => s + (p.totalAmount || 0), 0);
   const expiringCount = filtered.filter(p => {
     if (!p.expiryDate) return false;
@@ -3626,24 +3791,209 @@ Pages.purchases = function(container) {
   }
 
   html += '</div>';
-  container.innerHTML = html;
+  area.innerHTML = html;
+};
+
+// 周报/月报/年报
+Pages._purchaseRenderReport = function(purchases, mode) {
+  const area = document.getElementById('purchaseReportArea');
+  const now = new Date();
+  let startDate, endDate, label;
+
+  if (mode === 'week') {
+    const day = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+    startDate = Utils.formatDate(monday);
+    endDate = Utils.today();
+    label = '本周';
+  } else if (mode === 'month') {
+    startDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    endDate = Utils.today();
+    label = '本月';
+  } else {
+    startDate = `${now.getFullYear()}-01-01`;
+    endDate = Utils.today();
+    label = '本年';
+  }
+
+  const periodPurchases = purchases.filter(p => p.purchaseDate >= startDate && p.purchaseDate <= endDate);
+  const totalAmount = periodPurchases.reduce((s, p) => s + (p.totalAmount || 0), 0);
+  const totalCount = periodPurchases.length;
+
+  // 按食材名称汇总排行
+  const foodStats = {};
+  periodPurchases.forEach(p => {
+    const name = p.name || '未知';
+    if (!foodStats[name]) foodStats[name] = { count: 0, amount: 0, quantity: 0, unit: p.unit || '' };
+    foodStats[name].count++;
+    foodStats[name].amount += (p.totalAmount || 0);
+    foodStats[name].quantity += parseFloat(p.quantity) || 0;
+  });
+  const foodRanking = Object.entries(foodStats).sort((a, b) => b[1].amount - a[1].amount);
+
+  // 按分类汇总
+  const catStats = {};
+  periodPurchases.forEach(p => {
+    const cat = p.category || '未分类';
+    if (!catStats[cat]) catStats[cat] = { count: 0, amount: 0 };
+    catStats[cat].count++;
+    catStats[cat].amount += (p.totalAmount || 0);
+  });
+
+  // 按供应商汇总
+  const supplierStats = {};
+  periodPurchases.forEach(p => {
+    const sup = p.supplier || '未知';
+    if (!supplierStats[sup]) supplierStats[sup] = { count: 0, amount: 0 };
+    supplierStats[sup].count++;
+    supplierStats[sup].amount += (p.totalAmount || 0);
+  });
+
+  let html = `
+    <div class="card">
+      <div class="card-header"><div class="card-title">📊 ${label}进货汇总 (${startDate} ~ ${endDate})</div></div>
+      <div class="stat-grid" style="margin-bottom:16px;">
+        <div class="stat-card primary"><div class="stat-icon">💰</div><div class="stat-label">进货总额</div><div class="stat-value">¥${Utils.money(totalAmount)}</div></div>
+        <div class="stat-card info"><div class="stat-icon">📦</div><div class="stat-label">进货笔数</div><div class="stat-value">${totalCount}<small> 笔</small></div></div>
+        <div class="stat-card success"><div class="stat-icon">🥬</div><div class="stat-label">食材种类</div><div class="stat-value">${foodRanking.length}<small> 种</small></div></div>
+        <div class="stat-card warning"><div class="stat-icon">🚚</div><div class="stat-label">供应商数</div><div class="stat-value">${Object.keys(supplierStats).length}<small> 家</small></div></div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <div class="card-title" style="margin-bottom:12px;">🥇 食材进货排行 TOP 10</div>
+          ${foodRanking.length === 0 ? '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">暂无数据</div></div>' :
+            `<div class="table-wrap"><table class="data-table"><thead><tr>
+              <th>排名</th><th>食材名称</th><th>进货次数</th><th>总数量</th><th>总金额</th><th>占比</th>
+            </tr></thead><tbody>
+            ${foodRanking.slice(0, 10).map((item, i) => {
+              const pct = totalAmount > 0 ? (item[1].amount / totalAmount * 100).toFixed(1) : '0.0';
+              const medals = ['🥇','🥈','🥉'];
+              return `<tr>
+                <td>${medals[i] || (i+1)}</td>
+                <td class="font-bold">${item[0]}</td>
+                <td>${item[1].count} 次</td>
+                <td>${item[1].quantity} ${item[1].unit}</td>
+                <td class="text-primary font-bold">¥${Utils.money(item[1].amount)}</td>
+                <td>${pct}%</td>
+              </tr>`;
+            }).join('')}
+            </tbody></table></div>`
+          }
+        </div>
+        <div>
+          <div class="card-title" style="margin-bottom:12px;">📊 分类占比</div>
+          <div class="chart-container" style="height:220px;"><canvas id="purchaseCatChart"></canvas></div>
+          <div class="card-title" style="margin:16px 0 12px;">🚚 供应商占比</div>
+          <div class="chart-container" style="height:220px;"><canvas id="purchaseSupplierChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 全部食材明细表
+  if (foodRanking.length > 0) {
+    html += `
+      <div class="card">
+        <div class="card-header"><div class="card-title">📋 全部食材汇总明细</div></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>排名</th><th>食材名称</th><th>进货次数</th><th>总数量</th><th>总金额</th><th>金额占比</th>
+        </tr></thead><tbody>
+        ${foodRanking.map((item, i) => {
+          const pct = totalAmount > 0 ? (item[1].amount / totalAmount * 100).toFixed(1) : '0.0';
+          return `<tr>
+            <td>${i+1}</td>
+            <td class="font-bold">${item[0]}</td>
+            <td>${item[1].count} 次</td>
+            <td>${item[1].quantity} ${item[1].unit}</td>
+            <td class="text-primary font-bold">¥${Utils.money(item[1].amount)}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div style="width:60px;height:8px;background:#E9ECEF;border-radius:4px;overflow:hidden;">
+                  <div style="width:${pct}%;height:100%;background:var(--primary);"></div>
+                </div>
+                <span>${pct}%</span>
+              </div>
+            </td>
+          </tr>`;
+        }).join('')}
+        </tbody></table></div>
+      </div>
+    `;
+  }
+
+  area.innerHTML = html;
+
+  // 绘制图表
+  setTimeout(() => {
+    // 分类饼图
+    const ctx1 = document.getElementById('purchaseCatChart');
+    if (ctx1) {
+      App.destroyChart('purchaseCatChart');
+      const cats = Object.entries(catStats);
+      App.chartInstances['purchaseCatChart'] = new Chart(ctx1, {
+        type: 'doughnut',
+        data: {
+          labels: cats.map(c => c[0]),
+          datasets: [{
+            data: cats.map(c => c[1].amount),
+            backgroundColor: ['#E63946','#3B82F6','#10B981','#F59E0B','#8B5CF6','#EF476F'],
+            borderWidth: 2, borderColor: '#fff'
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 11 } } },
+            tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ¥${Utils.money(ctx.raw)}` } }
+          }
+        }
+      });
+    }
+
+    // 供应商饼图
+    const ctx2 = document.getElementById('purchaseSupplierChart');
+    if (ctx2) {
+      App.destroyChart('purchaseSupplierChart');
+      const sups = Object.entries(supplierStats);
+      App.chartInstances['purchaseSupplierChart'] = new Chart(ctx2, {
+        type: 'doughnut',
+        data: {
+          labels: sups.map(s => s[0]),
+          datasets: [{
+            data: sups.map(s => s[1].amount),
+            backgroundColor: ['#E63946','#3B82F6','#10B981','#F59E0B','#8B5CF6','#EF476F'],
+            borderWidth: 2, borderColor: '#fff'
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 11 } } },
+            tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ¥${Utils.money(ctx.raw)}` } }
+          }
+        }
+      });
+    }
+  }, 200);
 };
 
 Pages._searchPurchase = function(val) {
-  document.getElementById('content').dataset.search = val;
-  Pages.purchases(document.getElementById('content'));
+  document.getElementById('purchaseReportArea').dataset.search = val;
+  Pages._purchaseRenderDaily(DB.get('purchases', []));
 };
 
 Pages._filterPurchaseCat = function(val) {
-  document.getElementById('content').dataset.filterCat = val;
-  Pages.purchases(document.getElementById('content'));
+  document.getElementById('purchaseReportArea').dataset.filterCat = val;
+  Pages._purchaseRenderDaily(DB.get('purchases', []));
 };
 
 Pages._editPurchase = function(id) {
   UI.resetUploads();
   const purchase = id ? DB.findById('purchases', id) : {};
   const suppliers = DB.get('suppliers', []);
-  const categories = ['肉类','蔬菜','调料','饮料','米粉','包装盒','餐具','耗材','其他'];
+  const categories = ['花小小','快驴'];
   const units = ['kg','g','袋','箱','瓶','个','份','桶','包','L'];
 
   const body = `
@@ -3671,7 +4021,8 @@ Pages._editPurchase = function(id) {
         <label>供应商</label>
         <select class="form-control" name="supplier">
           <option value="">请选择</option>
-          ${suppliers.map(s => `<option value="${s.name}" ${purchase.supplier === s.name ? 'selected' : ''}>${s.name}</option>`).join('')}
+          <option value="花小小" ${purchase.supplier === '花小小' ? 'selected' : ''}>花小小</option>
+          <option value="快驴" ${purchase.supplier === '快驴' ? 'selected' : ''}>快驴</option>
         </select>
       </div>
       ${UI.field('联系电话', 'contactPhone', 'text', purchase.contactPhone || '', 'placeholder="供应商电话"')}
@@ -3905,7 +4256,7 @@ Pages._deleteSupplier = function(id) {
 /* ========== 库存管理 ========== */
 Pages.inventory = function(container) {
   const inv = DB.get('inventory', []);
-  const categories = ['肉类','米粉','调料','饮料','包装盒','餐具','耗材','其他'];
+  const categories = ['花小小','快驴'];
 
   // 统计
   const totalValue = inv.reduce((s, i) => s + (i.quantity || 0) * (i.purchasePrice || 0), 0);
@@ -3986,7 +4337,7 @@ Pages._searchInventory = function(val) {
 
 Pages._editInventory = function(id) {
   const item = id ? DB.findById('inventory', id) : {};
-  const categories = ['肉类','米粉','调料','饮料','包装盒','餐具','耗材','其他'];
+  const categories = ['花小小','快驴'];
   const units = ['kg','g','袋','箱','瓶','个','份','桶','包','L'];
   const body = `
     <div class="form-row">
@@ -5147,8 +5498,6 @@ const App = {
     { group: '进销存管理', items: [
       { id: 'purchases', icon: '📦', label: '食品进货台账' },
       { id: 'suppliers', icon: '🚚', label: '供应商管理' },
-      { id: 'inventory', icon: '🏪', label: '库存管理' },
-      { id: 'purchasePlan', icon: '📋', label: '采购计划' },
     ]},
     { group: '财务收支', items: [
       { id: 'dailySales', icon: '🧾', label: '每日营业记录' },
