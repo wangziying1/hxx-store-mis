@@ -946,6 +946,53 @@ const Utils = {
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   },
 
+  // ======== 数据联动公共函数 ========
+
+  // 计算某一天的固定支出分摊总额
+  fixedExpenseForDate(dateStr) {
+    const fixed = DB.get('fixedExpenses', []);
+    let total = 0;
+    fixed.forEach(f => {
+      if (dateStr >= f.startDate && dateStr <= f.endDate) {
+        const days = this.daysBetween(f.startDate, f.endDate) + 1;
+        total += days > 0 ? (f.totalAmount / days) : 0;
+      }
+    });
+    return total;
+  },
+
+  // 计算日期区间内的固定支出分摊总额
+  fixedExpenseForRange(startDate, endDate) {
+    const fixed = DB.get('fixedExpenses', []);
+    let total = 0;
+    fixed.forEach(f => {
+      const overlapStart = f.startDate > startDate ? f.startDate : startDate;
+      const overlapEnd = f.endDate < endDate ? f.endDate : endDate;
+      if (overlapStart <= overlapEnd) {
+        const overlapDays = this.daysBetween(overlapStart, overlapEnd) + 1;
+        const totalDays = this.daysBetween(f.startDate, f.endDate) + 1;
+        total += totalDays > 0 ? (f.totalAmount / totalDays * overlapDays) : 0;
+      }
+    });
+    return total;
+  },
+
+  // 计算某一天的总收入（营业额 + 其他收入）
+  incomeForDate(dateStr) {
+    const sales = DB.get('dailySales', []);
+    const incomes = DB.get('incomes', []);
+    const rev = sales.filter(s => s.date === dateStr).reduce((s, x) => s + (x.totalRevenue || 0), 0);
+    const inc = incomes.filter(i => i.date === dateStr).reduce((s, i) => s + (i.amount || 0), 0);
+    return rev + inc;
+  },
+
+  // 计算某一天的总支出（逐笔支出 + 固定支出分摊）
+  expenseForDate(dateStr) {
+    const expenses = DB.get('expenses', []);
+    const exp = expenses.filter(e => e.date === dateStr).reduce((s, e) => s + (e.amount || 0), 0);
+    return exp + this.fixedExpenseForDate(dateStr);
+  },
+
   // 导出 CSV
   exportCSV(filename, headers, rows) {
     let csv = headers.join(',') + '\n';
@@ -1718,6 +1765,7 @@ Pages._generateAIAnswer = function(question) {
   const q = question.toLowerCase();
   const sales = DB.get('dailySales', []);
   const expenses = DB.get('expenses', []);
+  const incomes = DB.get('incomes', []);
   const purchases = DB.get('purchases', []);
   const inv = DB.get('inventory', []);
 
@@ -1777,7 +1825,7 @@ AIBrain.generateInsights = function(sales, expenses, purchases, today) {
   const todayRevenue = todaySales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
   const todayOrders = todaySales.reduce((s, x) => s + (x.orderCount || 0), 0);
   const todayExp = expenses.filter(e => e.date === today);
-  const todayExpTotal = todayExp.reduce((s, e) => s + (e.amount || 0), 0);
+  const todayExpTotal = todayExp.reduce((s, e) => s + (e.amount || 0), 0) + Utils.fixedExpenseForDate(today);
 
   const yesterday = Utils.formatDate(Utils.addDays(today, -1));
   const yestSales = sales.filter(s => s.date === yesterday);
@@ -1871,8 +1919,8 @@ AIBrain.analyzeProfitDrop = function(sales, expenses, purchases) {
 
     const todayExp = expenses.filter(e => e.date === today);
     const yestExp = expenses.filter(e => e.date === yesterday);
-    const todayExpTotal = todayExp.reduce((s, e) => s + (e.amount || 0), 0);
-    const yestExpTotal = yestExp.reduce((s, e) => s + (e.amount || 0), 0);
+    const todayExpTotal = todayExp.reduce((s, e) => s + (e.amount || 0), 0) + Utils.fixedExpenseForDate(today);
+    const yestExpTotal = yestExp.reduce((s, e) => s + (e.amount || 0), 0) + Utils.fixedExpenseForDate(yesterday);
 
     const todayProfit = todayRevenue * 0.65 - todayExpTotal;
     const yestProfit = yestRevenue * 0.65 - yestExpTotal;
@@ -1977,9 +2025,10 @@ AIBrain.monthlySummary = function(sales, expenses, purchases) {
 
     const revenue = monthSales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
     const expTotal = monthExp.reduce((s, e) => s + (e.amount || 0), 0);
+    const fixedExp = Utils.fixedExpenseForRange(Utils.formatDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), Utils.today());
     const purTotal = monthPur.reduce((s, p) => s + (p.totalAmount || 0), 0);
     const grossProfit = revenue * 0.65;
-    const netProfit = grossProfit - expTotal;
+    const netProfit = grossProfit - expTotal - fixedExp;
     const orderCount = monthSales.reduce((s, x) => s + (x.orderCount || 0), 0);
     const avgPrice = orderCount > 0 ? revenue / orderCount : 0;
 
@@ -1993,11 +2042,12 @@ AIBrain.monthlySummary = function(sales, expenses, purchases) {
     result += `• 客单价：¥${Utils.money(avgPrice)}\n`;
     result += `• 毛利润：¥${Utils.money(grossProfit)}（毛利率65%）\n`;
     result += `• 净利润：¥${Utils.money(netProfit)}\n`;
-    result += `• 总支出：¥${Utils.money(expTotal + purTotal)}\n\n`;
+    result += `• 总支出：¥${Utils.money(expTotal + fixedExp + purTotal)}（含固定分摊¥${Utils.money(fixedExp)}）\n\n`;
 
     // 支出分类
     const expByCat = {};
     monthExp.forEach(e => { expByCat[e.category] = (expByCat[e.category] || 0) + (e.amount || 0); });
+    if (fixedExp > 0) expByCat['固定支出分摊'] = fixedExp;
     const sortedCats = Object.entries(expByCat).sort((a,b) => b[1]-a[1]);
 
     result += `**支出排行：**\n`;
@@ -2022,9 +2072,11 @@ AIBrain.costAnalysis = function(expenses, purchases) {
     const monthExp = expenses.filter(e => Utils.isThisMonth(e.date));
     const monthPur = purchases.filter(p => Utils.isThisMonth(p.purchaseDate));
     const purTotal = monthPur.reduce((s, p) => s + (p.totalAmount || 0), 0);
+    const fixedExp = Utils.fixedExpenseForRange(Utils.formatDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), Utils.today());
 
     const expByCat = {};
     monthExp.forEach(e => { expByCat[e.category] = (expByCat[e.category] || 0) + (e.amount || 0); });
+    if (fixedExp > 0) expByCat['固定支出分摊'] = fixedExp;
 
     const allCosts = [...Object.entries(expByCat), ['食材采购', purTotal]].sort((a,b) => b[1]-a[1]);
     const totalCost = allCosts.reduce((s, c) => s + c[1], 0);
@@ -2134,7 +2186,8 @@ AIBrain.businessAdvice = function(sales, expenses, purchases, inv) {
     const revenue = monthSales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
     const monthExp = expenses.filter(e => Utils.isThisMonth(e.date));
     const expTotal = monthExp.reduce((s, e) => s + (e.amount || 0), 0);
-    const netProfit = revenue * 0.65 - expTotal;
+    const fixedExp = Utils.fixedExpenseForRange(Utils.formatDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), Utils.today());
+    const netProfit = revenue * 0.65 - expTotal - fixedExp;
 
     let result = `💡 **经营建议报告**\n\n`;
 
@@ -2227,23 +2280,27 @@ let _chartRange = 'week';
 Pages.dashboard = function(container) {
   const sales = DB.get('dailySales', []);
   const expenses = DB.get('expenses', []);
+  const incomes = DB.get('incomes', []);
   const purchases = DB.get('purchases', []);
   const today = Utils.today();
 
-  // ============ 今日核心数据 ============
+  // ============ 今日核心数据（联动：含其他收入 + 固定支出分摊）============
   const todaySales = sales.filter(s => s.date === today);
   const todayRevenue = todaySales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
   const todayOrders = todaySales.reduce((s, x) => s + (x.orderCount || 0), 0);
+  const todayOtherIncome = incomes.filter(i => i.date === today).reduce((s, i) => s + (i.amount || 0), 0);
   const todayExpenses = expenses.filter(e => e.date === today);
   const todayExpTotal = todayExpenses.reduce((s, e) => s + (e.amount || 0), 0);
-  const todayProfit = todayRevenue * 0.65 - todayExpTotal;
+  const todayFixedExp = Utils.fixedExpenseForDate(today);
+  const todayProfit = (todayRevenue + todayOtherIncome) * 0.65 - todayExpTotal - todayFixedExp;
   const todayAlerts = AlertCenter.getAllAlerts().length;
 
   // 与昨天对比
   const yesterday = Utils.formatDate(Utils.addDays(today, -1));
   const yestRevenue = sales.filter(s => s.date === yesterday).reduce((s, x) => s + (x.totalRevenue || 0), 0);
   const yestOrders = sales.filter(s => s.date === yesterday).reduce((s, x) => s + (x.orderCount || 0), 0);
-  const yestProfit = yestRevenue * 0.65 - expenses.filter(e => e.date === yesterday).reduce((s, e) => s + (e.amount || 0), 0);
+  const yestOtherIncome = incomes.filter(i => i.date === yesterday).reduce((s, i) => s + (i.amount || 0), 0);
+  const yestProfit = (yestRevenue + yestOtherIncome) * 0.65 - expenses.filter(e => e.date === yesterday).reduce((s, e) => s + (e.amount || 0), 0) - Utils.fixedExpenseForDate(yesterday);
 
   const revChange = yestRevenue > 0 ? ((todayRevenue - yestRevenue) / yestRevenue * 100).toFixed(1) : 0;
   const orderChange = yestOrders > 0 ? ((todayOrders - yestOrders) / yestOrders * 100).toFixed(1) : 0;
@@ -2405,6 +2462,7 @@ Pages._renderMainTrend = function(container) {
 
   const sales = DB.get('dailySales', []);
   const expenses = DB.get('expenses', []);
+  const incomes = DB.get('incomes', []);
   const today = new Date();
 
   let labels = [], revData = [], profitData = [];
@@ -2415,27 +2473,33 @@ Pages._renderMainTrend = function(container) {
       const d = Utils.formatDate(Utils.addDays(Utils.today(), -i));
       labels.push(d.substring(5));
       const r = sales.filter(s => s.date === d).reduce((s, x) => s + (x.totalRevenue || 0), 0);
+      const oi = incomes.filter(i => i.date === d).reduce((s, i) => s + (i.amount || 0), 0);
       const e = expenses.filter(x => x.date === d).reduce((s, x) => s + (x.amount || 0), 0);
+      const fx = Utils.fixedExpenseForDate(d);
       revData.push(r);
-      profitData.push(r * 0.65 - e);
+      profitData.push((r + oi) * 0.65 - e - fx);
     }
   } else if (_chartRange === 'week') {
     for (let i = 6; i >= 0; i--) {
       const d = Utils.formatDate(Utils.addDays(Utils.today(), -i));
       labels.push(d.substring(5));
       const r = sales.filter(s => s.date === d).reduce((s, x) => s + (x.totalRevenue || 0), 0);
+      const oi = incomes.filter(i => i.date === d).reduce((s, i) => s + (i.amount || 0), 0);
       const e = expenses.filter(x => x.date === d).reduce((s, x) => s + (x.amount || 0), 0);
+      const fx = Utils.fixedExpenseForDate(d);
       revData.push(r);
-      profitData.push(r * 0.65 - e);
+      profitData.push((r + oi) * 0.65 - e - fx);
     }
   } else if (_chartRange === 'month') {
     for (let i = 29; i >= 0; i--) {
       const d = Utils.formatDate(Utils.addDays(Utils.today(), -i));
       labels.push(i % 5 === 0 ? d.substring(5) : '');
       const r = sales.filter(s => s.date === d).reduce((s, x) => s + (x.totalRevenue || 0), 0);
+      const oi = incomes.filter(i => i.date === d).reduce((s, i) => s + (i.amount || 0), 0);
       const e = expenses.filter(x => x.date === d).reduce((s, x) => s + (x.amount || 0), 0);
+      const fx = Utils.fixedExpenseForDate(d);
       revData.push(r);
-      profitData.push(r * 0.65 - e);
+      profitData.push((r + oi) * 0.65 - e - fx);
     }
   } else {
     // 本年按月
@@ -2448,9 +2512,11 @@ Pages._renderMainTrend = function(container) {
       const me = new Date(y, mm + 1, 0);
       const sStr = Utils.formatDate(ms), eStr = Utils.formatDate(me);
       const r = sales.filter(s => s.date >= sStr && s.date <= eStr).reduce((s, x) => s + (x.totalRevenue || 0), 0);
+      const oi = incomes.filter(i => i.date >= sStr && i.date <= eStr).reduce((s, i) => s + (i.amount || 0), 0);
       const e = expenses.filter(x => x.date >= sStr && x.date <= eStr).reduce((s, x) => s + (x.amount || 0), 0);
+      const fx = Utils.fixedExpenseForRange(sStr, eStr);
       revData.push(r);
-      profitData.push(r * 0.65 - e);
+      profitData.push((r + oi) * 0.65 - e - fx);
     }
   }
 
@@ -2600,24 +2666,30 @@ Pages._renderCostDonut = function(container, todayExpenses) {
 Pages.boss = function(container) {
   const sales = DB.get('dailySales', []);
   const expenses = DB.get('expenses', []);
+  const incomes = DB.get('incomes', []);
   const purchases = DB.get('purchases', []);
   const now = new Date();
   const today = Utils.today();
 
   const todaySales = sales.filter(s => s.date === today);
   const todayRevenue = todaySales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
+  const todayOtherIncome = incomes.filter(i => i.date === today).reduce((s, i) => s + (i.amount || 0), 0);
   const todayExpTotal = expenses.filter(e => e.date === today).reduce((s, e) => s + (e.amount || 0), 0);
-  const todayProfit = todayRevenue * 0.65 - todayExpTotal;
+  const todayProfit = (todayRevenue + todayOtherIncome) * 0.65 - todayExpTotal - Utils.fixedExpenseForDate(today);
 
   const monthSales = sales.filter(s => Utils.isThisMonth(s.date));
   const monthRevenue = monthSales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
+  const monthOtherIncome = incomes.filter(i => Utils.isThisMonth(i.date)).reduce((s, i) => s + (i.amount || 0), 0);
   const monthExpTotal = expenses.filter(e => Utils.isThisMonth(e.date)).reduce((s, e) => s + (e.amount || 0), 0);
-  const monthProfit = monthRevenue * 0.65 - monthExpTotal;
+  const monthFixedExp = Utils.fixedExpenseForRange(Utils.formatDate(new Date(now.getFullYear(), now.getMonth(), 1)), Utils.today());
+  const monthProfit = (monthRevenue + monthOtherIncome) * 0.65 - monthExpTotal - monthFixedExp;
 
   const yearSales = sales.filter(s => new Date(s.date).getFullYear() === now.getFullYear());
   const yearRevenue = yearSales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
+  const yearOtherIncome = incomes.filter(i => new Date(i.date).getFullYear() === now.getFullYear()).reduce((s, i) => s + (i.amount || 0), 0);
   const yearExpTotal = expenses.filter(e => new Date(e.date).getFullYear() === now.getFullYear()).reduce((s, e) => s + (e.amount || 0), 0);
-  const yearProfit = yearRevenue * 0.65 - yearExpTotal;
+  const yearFixedExp = Utils.fixedExpenseForRange(Utils.formatDate(new Date(now.getFullYear(), 0, 1)), Utils.formatDate(new Date(now.getFullYear(), 11, 31)));
+  const yearProfit = (yearRevenue + yearOtherIncome) * 0.65 - yearExpTotal - yearFixedExp;
 
   // 成本排行
   const monthExpByCat = {};
@@ -3168,15 +3240,23 @@ Pages._deleteExpense = function(id) {
 
 Pages._exportExpenses = function() {
   const expenses = DB.get('expenses', []);
+  const fixedExpenses = DB.get('fixedExpenses', []);
   const headers = ['日期','分类','金额','支付方式','备注'];
   const rows = expenses.map(e => [e.date, e.category, e.amount, e.paymentMethod, e.remark]);
+  // 追加固定支出分摊明细
+  fixedExpenses.forEach(f => {
+    const days = Utils.daysBetween(f.startDate, f.endDate) + 1;
+    const daily = days > 0 ? (f.totalAmount / days) : 0;
+    rows.push([f.startDate + ' ~ ' + f.endDate, '固定支出分摊(' + (f.name || '') + ')', daily.toFixed(2), '自动分摊', '每天分摊金额，总' + f.totalAmount + '元/' + days + '天']);
+  });
   Utils.exportCSV(`支出记录_${Utils.today()}.csv`, headers, rows);
-  toast('已导出', 'success');
+  toast('已导出（含固定支出分摊）', 'success');
 };
 
 /* ========== 每日收入 ========== */
 Pages.incomes = function(container) {
   const incomes = DB.get('incomes', []);
+  const sales = DB.get('dailySales', []);
   incomes.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   const sources = ['美团','淘宝','京东','堂食现金','微信','支付宝','其他'];
 
@@ -3214,9 +3294,12 @@ Pages.incomes = function(container) {
   const monthInc = incomes.filter(i => Utils.isThisMonth(i.date));
   const monthTotal = monthInc.reduce((s, i) => s + (i.amount || 0), 0);
   const todayTotal = incomes.filter(i => Utils.isToday(i.date)).reduce((s, i) => s + (i.amount || 0), 0);
+  // 联动：加入营业额
+  const todaySalesRev = sales.filter(s => Utils.isToday(s.date)).reduce((s, x) => s + (x.totalRevenue || 0), 0);
+  const monthSalesRev = sales.filter(s => Utils.isThisMonth(s.date)).reduce((s, x) => s + (x.totalRevenue || 0), 0);
   document.getElementById('incomeStats').innerHTML = `
-    <div class="stat-card success"><div class="stat-icon">💰</div><div class="stat-label">今日收入</div><div class="stat-value">¥${Utils.money(todayTotal)}</div></div>
-    <div class="stat-card primary"><div class="stat-icon">📆</div><div class="stat-label">本月收入</div><div class="stat-value">¥${Utils.money(monthTotal)}</div></div>
+    <div class="stat-card success"><div class="stat-icon">💰</div><div class="stat-label">今日总收入</div><div class="stat-value">¥${Utils.money(todayTotal + todaySalesRev)}</div><div class="stat-sub text-muted text-sm">营业额 ¥${Utils.money(todaySalesRev)} + 其他 ¥${Utils.money(todayTotal)}</div></div>
+    <div class="stat-card primary"><div class="stat-icon">📆</div><div class="stat-label">本月总收入</div><div class="stat-value">¥${Utils.money(monthTotal + monthSalesRev)}</div><div class="stat-sub text-muted text-sm">营业额 ¥${Utils.money(monthSalesRev)} + 其他 ¥${Utils.money(monthTotal)}</div></div>
     <div class="stat-card info"><div class="stat-icon">📊</div><div class="stat-label">收入记录</div><div class="stat-value">${incomes.length}<small> 笔</small></div></div>
   `;
 };
@@ -3261,42 +3344,48 @@ Pages._deleteIncome = function(id) {
 Pages.profit = function(container) {
   const sales = DB.get('dailySales', []);
   const expenses = DB.get('expenses', []);
+  const incomes = DB.get('incomes', []);
   const purchases = DB.get('purchases', []);
   const now = new Date();
 
-  // 本月数据
+  // 本月数据（联动：含其他收入 + 固定支出分摊）
   const monthSales = sales.filter(s => Utils.isThisMonth(s.date));
   const monthRevenue = monthSales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
+  const monthOtherIncome = incomes.filter(i => Utils.isThisMonth(i.date)).reduce((s, i) => s + (i.amount || 0), 0);
   const monthExp = expenses.filter(e => Utils.isThisMonth(e.date));
   const monthExpTotal = monthExp.reduce((s, e) => s + (e.amount || 0), 0);
   const monthPurchases = purchases.filter(p => Utils.isThisMonth(p.purchaseDate));
   const monthPurchaseTotal = monthPurchases.reduce((s, p) => s + (p.totalAmount || 0), 0);
+  const monthFixedExp = Utils.fixedExpenseForRange(Utils.formatDate(new Date(now.getFullYear(), now.getMonth(), 1)), Utils.today());
 
   // 分类统计
   const expByCat = {};
   monthExp.forEach(e => { expByCat[e.category] = (expByCat[e.category] || 0) + (e.amount || 0); });
 
-  const grossProfit = monthRevenue * 0.65;
-  const netProfit = grossProfit - monthExpTotal;
-  const costRate = monthRevenue > 0 ? ((monthExpTotal + monthPurchaseTotal) / monthRevenue * 100) : 0;
+  const totalRevenue = monthRevenue + monthOtherIncome;
+  const grossProfit = totalRevenue * 0.65;
+  const netProfit = grossProfit - monthExpTotal - monthFixedExp;
+  const costRate = totalRevenue > 0 ? ((monthExpTotal + monthFixedExp + monthPurchaseTotal) / totalRevenue * 100) : 0;
 
   const employees = DB.get('employees', []);
   const laborCost = expByCat['工资'] || employees.reduce((s, e) => s + (e.salary || 0), 0);
-  const rent = expByCat['房租'] || 0;
+  const rent = (expByCat['房租'] || 0) + monthFixedExp; // 固定支出分摊主要就是房租类
   const utility = (expByCat['水电'] || 0) + (expByCat['燃气'] || 0);
   const ingredient = monthPurchaseTotal;
   const packaging = expByCat['办公用品'] || 0;
   const promotion = (expByCat['平台推广'] || 0) + (expByCat['广告'] || 0);
 
-  const pct = (val) => monthRevenue > 0 ? (val / monthRevenue * 100).toFixed(1) : '0';
+  const pct = (val) => totalRevenue > 0 ? (val / totalRevenue * 100).toFixed(1) : '0';
 
   let html = `
     <div class="section-title">📆 本月利润分析 (${now.getFullYear()}年${now.getMonth()+1}月)</div>
-    <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);">
+    <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);">
       <div class="stat-card primary"><div class="stat-icon">💰</div><div class="stat-label">营业额</div><div class="stat-value">¥${Utils.money(monthRevenue)}</div></div>
+      <div class="stat-card success"><div class="stat-icon">💵</div><div class="stat-label">其他收入</div><div class="stat-value">¥${Utils.money(monthOtherIncome)}</div></div>
       <div class="stat-card success"><div class="stat-icon">📈</div><div class="stat-label">毛利润</div><div class="stat-value">¥${Utils.money(grossProfit)}</div></div>
       <div class="stat-card ${netProfit >= 0 ? 'primary' : 'danger'}"><div class="stat-icon">💎</div><div class="stat-label">净利润</div><div class="stat-value">¥${Utils.money(netProfit)}</div></div>
     </div>
+    <div class="text-muted text-sm" style="padding:0 4px 8px;">💡 总收入 ¥${Utils.money(totalRevenue)} = 营业额 ¥${Utils.money(monthRevenue)} + 其他收入 ¥${Utils.money(monthOtherIncome)}；支出含固定分摊 ¥${Utils.money(monthFixedExp)}</div>
 
     <div class="card">
       <div class="card-header"><div class="card-title">📊 成本占比分析</div></div>
@@ -3309,7 +3398,7 @@ Pages.profit = function(container) {
           <tr><td class="font-bold">⚡ 水电燃气</td><td>¥${Utils.money(utility)}</td><td>${pct(utility)}%</td><td><div class="progress" style="width:200px;"><div class="progress-bar" style="width:${Math.min(pct(utility),100)}%;background:#FFD166;"></div></div></td></tr>
           <tr><td class="font-bold">📦 包装耗材</td><td>¥${Utils.money(packaging)}</td><td>${pct(packaging)}%</td><td><div class="progress" style="width:200px;"><div class="progress-bar" style="width:${Math.min(pct(packaging),100)}%;background:#06D6A0;"></div></div></td></tr>
           <tr><td class="font-bold">📢 推广</td><td>¥${Utils.money(promotion)}</td><td>${pct(promotion)}%</td><td><div class="progress" style="width:200px;"><div class="progress-bar" style="width:${Math.min(pct(promotion),100)}%;background:#8338EC;"></div></div></td></tr>
-          <tr><td class="font-bold text-danger">💸 总成本</td><td class="font-bold text-danger">¥${Utils.money(monthExpTotal + monthPurchaseTotal)}</td><td class="font-bold text-danger">${pct(monthExpTotal + monthPurchaseTotal)}%</td><td></td></tr>
+          <tr><td class="font-bold text-danger">💸 总成本</td><td class="font-bold text-danger">¥${Utils.money(monthExpTotal + monthFixedExp + monthPurchaseTotal)}</td><td class="font-bold text-danger">${pct(monthExpTotal + monthFixedExp + monthPurchaseTotal)}%</td><td></td></tr>
         </tbody>
       </table></div>
     </div>
@@ -3332,7 +3421,7 @@ Pages.profit = function(container) {
     }
     const revData = days.map(d => sales.filter(s => s.date === d).reduce((s, x) => s + (x.totalRevenue || 0), 0));
     const grossData = revData.map(r => r * 0.65);
-    const netData = days.map((d, i) => grossData[i] - expenses.filter(e => e.date === d).reduce((s, e) => s + (e.amount || 0), 0));
+    const netData = days.map((d, i) => grossData[i] - expenses.filter(e => e.date === d).reduce((s, e) => s + (e.amount || 0), 0) - Utils.fixedExpenseForDate(d));
 
     App.chartInstances.profit = new Chart(canvas.getContext('2d'), {
       type: 'line',
@@ -3355,12 +3444,13 @@ Pages.cashflow = function(container) {
   const expenses = DB.get('expenses', []);
   const incomes = DB.get('incomes', []);
 
-  // 今日收支
+  // 今日收支（联动：支出含固定分摊）
   const todayRevenue = sales.filter(s => Utils.isToday(s.date)).reduce((s, x) => s + (x.totalRevenue || 0), 0);
   const todayIncome = incomes.filter(i => Utils.isToday(i.date)).reduce((s, i) => s + (i.amount || 0), 0);
   const todayExpense = expenses.filter(e => Utils.isToday(e.date)).reduce((s, e) => s + (e.amount || 0), 0);
+  const todayFixedExp = Utils.fixedExpenseForDate(Utils.today());
   const todayIn = todayRevenue + todayIncome;
-  const todayOut = todayExpense;
+  const todayOut = todayExpense + todayFixedExp;
 
   // 账户余额（从现金流账户表获取）
   const accounts = DB.get('cashflow', []);
@@ -3379,7 +3469,7 @@ Pages.cashflow = function(container) {
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const dayOfMonth = now.getDate();
   const monthRevenue = sales.filter(s => Utils.isThisMonth(s.date)).reduce((s, x) => s + (x.totalRevenue || 0), 0);
-  const monthExpense = expenses.filter(e => Utils.isThisMonth(e.date)).reduce((s, e) => s + (e.amount || 0), 0);
+  const monthExpense = expenses.filter(e => Utils.isThisMonth(e.date)).reduce((s, e) => s + (e.amount || 0), 0) + Utils.fixedExpenseForRange(Utils.formatDate(new Date(now.getFullYear(), now.getMonth(), 1)), Utils.today());
   const avgDailyRevenue = dayOfMonth > 0 ? monthRevenue / dayOfMonth : 0;
   const avgDailyExpense = dayOfMonth > 0 ? monthExpense / dayOfMonth : 0;
   const remainingDays = daysInMonth - dayOfMonth;
@@ -3568,14 +3658,17 @@ Pages._generateReport = function() {
 
   const revenue = periodSales.reduce((s, x) => s + (x.totalRevenue || 0), 0);
   const expTotal = periodExp.reduce((s, e) => s + (e.amount || 0), 0);
+  const fixedExpTotal = Utils.fixedExpenseForRange(sStr, eStr);
   const purchaseTotal = periodPur.reduce((s, p) => s + (p.totalAmount || 0), 0);
   const incomeTotal = periodInc.reduce((s, i) => s + (i.amount || 0), 0);
-  const grossProfit = revenue * 0.65;
-  const netProfit = grossProfit - expTotal;
+  const totalRevenue = revenue + incomeTotal;
+  const grossProfit = totalRevenue * 0.65;
+  const netProfit = grossProfit - expTotal - fixedExpTotal;
 
   // 支出分类
   const expByCat = {};
   periodExp.forEach(e => { expByCat[e.category] = (expByCat[e.category] || 0) + (e.amount || 0); });
+  if (fixedExpTotal > 0) expByCat['固定支出分摊'] = fixedExpTotal;
 
   // 平台
   const platformData = {};
@@ -3600,7 +3693,7 @@ Pages._generateReport = function() {
         <div class="stat-card primary"><div class="stat-label">营业额</div><div class="stat-value">¥${Utils.money(revenue)}</div></div>
         <div class="stat-card success"><div class="stat-label">毛利润</div><div class="stat-value">¥${Utils.money(grossProfit)}</div></div>
         <div class="stat-card ${netProfit >= 0 ? 'primary' : 'danger'}"><div class="stat-label">净利润</div><div class="stat-value">¥${Utils.money(netProfit)}</div></div>
-        <div class="stat-card warning"><div class="stat-label">总支出</div><div class="stat-value">¥${Utils.money(expTotal + purchaseTotal)}</div></div>
+        <div class="stat-card warning"><div class="stat-label">总支出</div><div class="stat-value">¥${Utils.money(expTotal + fixedExpTotal + purchaseTotal)}</div></div>
       </div>
 
       <div class="section-title">💰 收入明细</div>
@@ -3618,10 +3711,10 @@ Pages._generateReport = function() {
         <thead><tr><th>分类</th><th>金额</th><th>占比</th></tr></thead>
         <tbody>
           ${Object.entries(expByCat).sort((a,b) => b[1]-a[1]).map(([cat, amt]) => `
-            <tr><td>${cat}</td><td class="text-danger">¥${Utils.money(amt)}</td><td>${expTotal > 0 ? (amt/expTotal*100).toFixed(1) : 0}%</td></tr>
+            <tr><td>${cat}</td><td class="text-danger">¥${Utils.money(amt)}</td><td>${(expTotal + fixedExpTotal) > 0 ? (amt/(expTotal + fixedExpTotal)*100).toFixed(1) : 0}%</td></tr>
           `).join('')}
           <tr><td>食材采购</td><td class="text-danger">¥${Utils.money(purchaseTotal)}</td><td>-</td></tr>
-          <tr><td class="font-bold">总支出</td><td class="font-bold text-danger">¥${Utils.money(expTotal + purchaseTotal)}</td><td>100%</td></tr>
+          <tr><td class="font-bold">总支出</td><td class="font-bold text-danger">¥${Utils.money(expTotal + fixedExpTotal + purchaseTotal)}</td><td>100%</td></tr>
         </tbody>
       </table></div>
 
@@ -3640,8 +3733,8 @@ Pages._generateReport = function() {
         <thead><tr><th>项目</th><th>金额</th></tr></thead>
         <tbody>
           <tr><td>现金流入（营业+其他收入）</td><td class="text-success">¥${Utils.money(revenue + incomeTotal)}</td></tr>
-          <tr><td>现金流出（支出+采购）</td><td class="text-danger">¥${Utils.money(expTotal + purchaseTotal)}</td></tr>
-          <tr><td class="font-bold">净现金流</td><td class="font-bold ${revenue + incomeTotal - expTotal - purchaseTotal >= 0 ? 'text-success' : 'text-danger'}">¥${Utils.money(revenue + incomeTotal - expTotal - purchaseTotal)}</td></tr>
+          <tr><td>现金流出（支出+固定分摊+采购）</td><td class="text-danger">¥${Utils.money(expTotal + fixedExpTotal + purchaseTotal)}</td></tr>
+          <tr><td class="font-bold">净现金流</td><td class="font-bold ${revenue + incomeTotal - expTotal - fixedExpTotal - purchaseTotal >= 0 ? 'text-success' : 'text-danger'}">¥${Utils.money(revenue + incomeTotal - expTotal - fixedExpTotal - purchaseTotal)}</td></tr>
         </tbody>
       </table></div>
     </div>
@@ -5386,8 +5479,8 @@ Pages.stats = function(container) {
       options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { callback: v => '¥' + v } } } }
     });
 
-    // 利润走势
-    const profitData = days.map((d, i) => revData[i] * 0.65 - expenses.filter(e => e.date === d).reduce((s, e) => s + (e.amount || 0), 0));
+    // 利润走势（联动：含固定支出分摊）
+    const profitData = days.map((d, i) => revData[i] * 0.65 - expenses.filter(e => e.date === d).reduce((s, e) => s + (e.amount || 0), 0) - Utils.fixedExpenseForDate(d));
     App.chartInstances.statProfit = new Chart(container.querySelector('#statProfitChart').getContext('2d'), {
       type: 'line',
       data: { labels: days.map(d => d.substring(5)), datasets: [{ label: '净利润', data: profitData, borderColor: '#06D6A0', backgroundColor: 'rgba(6,214,160,0.1)', fill: true, tension: 0.3 }] },
