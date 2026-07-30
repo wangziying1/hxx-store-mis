@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="花小小管理">
-  <meta name="theme-color" content="#FFFFFF">
+  <meta name="theme-color" content="#E63946">
   <title>花小小新疆炒米粉 - 门店管理系统</title>
   <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIuiKseWwj+Wwj+aWsOeWhueCkuexs+eyiSAtIOmXqOW6l+euoeeQhuezu+e7nyIsCiAgInNob3J0X25hbWUiOiAi6Iqx5bCP5bCP566h55CGIiwKICAiZGVzY3JpcHRpb24iOiAi6Iqx5bCP5bCP5paw55aG54KS57Gz57KJ6Zeo5bqX566h55CG5LiA56uZ5byP57O757ufIC0g6L+b6ZSA5a2Y44CB6LSi5Yqh44CB5ZGY5bel44CB6aOf5ZOB5a6J5YWo5YWo5pCe5a6aIiwKICAic3RhcnRfdXJsIjogIi8iLAogICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLAogICJvcmllbnRhdGlvbiI6ICJwb3J0cmFpdCIsCiAgInRoZW1lX2NvbG9yIjogIiMxRDM1NTciLAogICJiYWNrZ3JvdW5kX2NvbG9yIjogIiNGNUY2RkEiLAogICJpY29ucyI6IFsKICAgIHsKICAgICAgInNyYyI6ICJkYXRhOmltYWdlL3N2Zyt4bWwsJTNDc3ZnIHhtbG5zPSdodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2Zycgdmlld0JveD0nMCAwIDE5MiAxOTInJTNFJTNDcmVjdCB3aWR0aD0nMTkyJyBoZWlnaHQ9JzE5Micgcng9JzM4JyBmaWxsPSclMjMxRDM1NTcnLyUzRSUzQ3RleHQgeD0nOTYnIHk9JzEyOCcgdGV4dC1hbmNob3I9J21pZGRsZScgZm9udC1zaXplPScxMTAnJTNF8J+Mtu+4jyUzQy90ZXh0JTNFJTNDL3N2ZyUzRSIsCiAgICAgICJzaXplcyI6ICIxOTJ4MTkyIiwKICAgICAgInR5cGUiOiAiaW1hZ2Uvc3ZnK3htbCIsCiAgICAgICJwdXJwb3NlIjogImFueSBtYXNrYWJsZSIKICAgIH0sCiAgICB7CiAgICAgICJzcmMiOiAiZGF0YTppbWFnZS9zdmcreG1sLCUzQ3N2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCA1MTIgNTEyJyUzRSUzQ3JlY3Qgd2lkdGg9JzUxMicgaGVpZ2h0PSc1MTInIHJ4PScxMDAnIGZpbGw9JyUyMzFEMzU1NycvJTNFJTNDdGV4dCB4PScyNTYnIHk9JzM0MCcgdGV4dC1hbmNob3I9J21pZGRsZScgZm9udC1zaXplPScyOTAnJTNF8J+Mtu+4jyUzQy90ZXh0JTNFJTNDL3N2ZyUzRSIsCiAgICAgICJzaXplcyI6ICI1MTJ4NTEyIiwKICAgICAgInR5cGUiOiAiaW1hZ2Uvc3ZnK3htbCIsCiAgICAgICJwdXJwb3NlIjogImFueSBtYXNrYWJsZSIKICAgIH0KICBdCn0K">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🌶️%3C/text%3E%3C/svg%3E">
@@ -60,6 +60,43 @@ body {
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+}
+
+/* iOS 顶部安全区占位条 */
+.status-bar-safe-area {
+  height: env(safe-area-inset-top, 0);
+  background: var(--primary);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+}
+
+/* 兼容旧版 iOS/WebView：给一个最小高度 */
+@supports not (height: env(safe-area-inset-top)) {
+  .status-bar-safe-area { height: 20px; }
+}
+
+/* 当作为手机主屏幕 App 打开时，加一条纯红色实心带 */
+@media all and (display-mode: standalone) {
+  .status-bar-safe-area {
+    height: calc(env(safe-area-inset-top, 20px));
+    background: var(--primary);
+  }
+  .topbar {
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  }
+  .sidebar {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* 非 standalone 浏览器也确保顶部不被遮挡 */
+.status-bar-safe-area-visible {
+  height: env(safe-area-inset-top, 0);
+  min-height: 0;
+  background: var(--primary);
 }
 
 /* ===== Layout ===== */
@@ -147,12 +184,13 @@ body {
 }
 
 .topbar {
-  background: var(--card-bg);
-  padding: 14px 24px;
+  background: var(--primary);
+  color: #fff;
+  padding: 12px 16px calc(12px + env(safe-area-inset-top, 0px));
+  padding-top: calc(12px + env(safe-area-inset-top, 20px));
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border-light);
   position: sticky;
   top: 0;
   z-index: 50;
@@ -160,21 +198,22 @@ body {
 .topbar-left { display: flex; align-items: center; gap: 12px; }
 .topbar-left .menu-toggle {
   display: none; font-size: 20px; cursor: pointer;
-  background: none; border: none; color: var(--text);
+  background: none; border: none; color: #fff;
 }
-.topbar h1 { font-size: 17px; font-weight: 700; color: var(--text); }
-.topbar-right { display: flex; align-items: center; gap: 16px; }
-.topbar-date { font-size: 13px; color: var(--text-muted); }
+.topbar h1 { font-size: 17px; font-weight: 700; color: #fff; }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar-date { font-size: 13px; color: rgba(255,255,255,0.85); }
 .alert-badge {
   position: relative; cursor: pointer;
   width: 36px; height: 36px;
   border-radius: 50%;
-  background: var(--border-light);
+  background: rgba(255,255,255,0.2);
   display: flex; align-items: center; justify-content: center;
   font-size: 16px;
   transition: background 0.2s;
+  color: #fff;
 }
-.alert-badge:hover { background: var(--border); }
+.alert-badge:hover { background: rgba(255,255,255,0.3); }
 .alert-badge .badge-count {
   position: absolute;
   top: -2px; right: -2px;
@@ -526,23 +565,35 @@ textarea.form-control { resize: vertical; min-height: 60px; }
 /* ===== Quick Actions ===== */
 .quick-actions {
   display: flex; gap: 8px;
+  margin-top: 8px;
   margin-bottom: 16px; overflow-x: auto;
-  padding-bottom: 4px;
+  padding: 4px 2px 6px;
+  -webkit-overflow-scrolling: touch;
 }
 .quick-action {
   display: flex; align-items: center; gap: 6px;
-  padding: 8px 14px;
+  padding: 10px 16px;
+  min-height: 40px;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: 20px;
-  font-size: 12px; font-weight: 600;
+  font-size: 13px; font-weight: 600;
   color: var(--text-secondary);
   cursor: pointer; white-space: nowrap;
   transition: all 0.15s;
   box-shadow: var(--shadow-sm);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  touch-action: manipulation;
+}
+.quick-action:active {
+  transform: scale(0.96);
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 .quick-action:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
-.quick-action .qa-icon { font-size: 14px; }
+.quick-action .qa-icon { font-size: 15px; }
 
 /* ===== AI Chat ===== */
 .chat-container { display: flex; flex-direction: column; }
@@ -682,6 +733,9 @@ textarea.form-control { resize: vertical; min-height: 60px; }
   </script>
 </head>
 <body>
+  <!-- iOS 顶部安全区占位条（纯红色） -->
+  <div class="status-bar-safe-area"></div>
+
   <div class="app-layout">
     <!-- 侧边栏 -->
     <aside class="sidebar" id="sidebar">
@@ -698,6 +752,7 @@ textarea.form-control { resize: vertical; min-height: 60px; }
 
     <!-- 主区域 -->
     <div class="main-area">
+      <div style="height: env(safe-area-inset-top, 0); background: var(--primary); margin-left: var(--sidebar-w);"></div>
       <header class="topbar">
         <div class="topbar-left">
           <button class="menu-toggle" id="menuToggle">☰</button>
