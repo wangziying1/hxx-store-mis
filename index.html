@@ -749,6 +749,8 @@ const DB = {
 
   set(key, value) {
     localStorage.setItem(this._prefix + key, JSON.stringify(value));
+    // 触发云端同步（防抖）
+    if (typeof CloudSync !== 'undefined') CloudSync.autoPush();
   },
 
   // 各数据表
@@ -943,6 +945,147 @@ const Utils = {
 function confirmDialog(msg, callback) {
   if (confirm(msg)) callback();
 }
+
+/* ===== 云端同步 - GitHub Gist ===== */
+const CloudSync = {
+  GIST_ID: 'c401ba2dff8bf0c9abdb1f241aadbd96',
+  GIST_RAW: 'https://gist.githubusercontent.com/wangziying1/c401ba2dff8bf0c9abdb1f241aadbd96/raw/hxx_store_data.json',
+  GIST_API: 'https://api.github.com/gists/c401ba2dff8bf0c9abdb1f241aadbd96',
+
+  // 所有需要同步的数据表
+  SYNC_TABLES: ['dailySales','expenses','incomes','purchases','suppliers','inventory',
+    'employees','foodSafety','equipment','contracts','licenses','complaints','badReviews',
+    'cashflow','products','settings'],
+
+  _token: null,
+  _syncing: false,
+  _lastSync: null,
+
+  // 获取 token（从设置或缓存读取）
+  getToken() {
+    if (this._token) return this._token;
+    this._token = localStorage.getItem('hxx_mis_github_token') || '';
+    return this._token;
+  },
+
+  // 设置 token
+  setToken(t) {
+    this._token = t;
+    localStorage.setItem('hxx_mis_github_token', t);
+  },
+
+  // 导出所有数据为 JSON
+  exportData() {
+    const data = { _version: 2, _updated: new Date().toISOString() };
+    this.SYNC_TABLES.forEach(t => {
+      data[t] = DB.get(t, []);
+    });
+    return data;
+  },
+
+  // 导入 JSON 数据到 localStorage
+  importData(jsonData) {
+    if (!jsonData || !jsonData._version) return false;
+    this.SYNC_TABLES.forEach(t => {
+      if (jsonData[t] && Array.isArray(jsonData[t])) {
+        DB.set(t, jsonData[t]);
+      }
+    });
+    localStorage.setItem('hxx_mis_hasVisited', '1');
+    return true;
+  },
+
+  // 从 Gist 拉取数据（不需要 token，公开 Gist 可直接读）
+  async pull() {
+    try {
+      const resp = await fetch(this.GIST_RAW + '?t=' + Date.now());
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      if (!data._updated) return null;
+
+      const localUpdated = localStorage.getItem('hxx_mis_lastSync');
+      // 如果云端数据比本地新，或者本地没有同步记录，则拉取
+      if (!localUpdated || data._updated > localUpdated) {
+        this.importData(data);
+        localStorage.setItem('hxx_mis_lastSync', data._updated);
+        this._lastSync = data._updated;
+        return { action: 'pulled', time: data._updated };
+      }
+      return { action: 'uptodate', time: localUpdated };
+    } catch(e) {
+      console.warn('CloudSync pull failed:', e.message);
+      return null;
+    }
+  },
+
+  // 上传数据到 Gist（需要 token）
+  async push() {
+    const token = this.getToken();
+    if (!token) return { action: 'no_token' };
+
+    if (this._syncing) return { action: 'busy' };
+    this._syncing = true;
+
+    try {
+      const data = this.exportData();
+      const resp = await fetch(this.GIST_API, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': 'token ' + token,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          files: { 'hxx_store_data.json': { content: JSON.stringify(data) } }
+        })
+      });
+
+      if (!resp.ok) {
+        if (resp.status === 401) { this.setToken(''); return { action: 'bad_token' }; }
+        throw new Error('HTTP ' + resp.status);
+      }
+
+      localStorage.setItem('hxx_mis_lastSync', data._updated);
+      this._lastSync = data._updated;
+      return { action: 'pushed', time: data._updated };
+    } catch(e) {
+      console.warn('CloudSync push failed:', e.message);
+      return { action: 'error', msg: e.message };
+    } finally {
+      this._syncing = false;
+    }
+  },
+
+  // 自动拉取（页面加载时调用）
+  async autoPull() {
+    const result = await this.pull();
+    if (result && result.action === 'pulled') {
+      console.log('CloudSync: 已从云端同步数据 ' + result.time);
+      return true;
+    }
+    return false;
+  },
+
+  // 自动上传（保存数据后调用，延迟防抖）
+  _pushTimer: null,
+  autoPush() {
+    const token = this.getToken();
+    if (!token) return;
+    clearTimeout(this._pushTimer);
+    this._pushTimer = setTimeout(() => this.push(), 2000);
+  },
+
+  // 获取同步状态文本
+  getStatus() {
+    const token = this.getToken();
+    if (!token) return { text: '未配置', color: '#ADB5BD', icon: '⚪' };
+    if (this._syncing) return { text: '同步中...', color: '#3B82F6', icon: '🔄' };
+    if (this._lastSync) {
+      const ago = Math.floor((Date.now() - new Date(this._lastSync).getTime()) / 60000);
+      return { text: ago < 1 ? '刚刚同步' : ago + '分钟前', color: '#10B981', icon: '✅' };
+    }
+    return { text: '等待同步', color: '#F59E0B', icon: '🟡' };
+  }
+};
 
 function toast(msg, type = 'info') {
   const t = document.createElement('div');
@@ -1340,11 +1483,31 @@ const SeedData = {
 
 // 数据管理菜单
 Pages._showDataMenu = function() {
+  const syncStatus = CloudSync.getStatus();
+  const hasToken = CloudSync.getToken();
+
   UI.modal('数据管理', `
     <div style="display:flex;flex-direction:column;gap:12px;">
       <div class="text-muted text-sm" style="padding:10px 12px;background:#FFF7ED;border-radius:6px;color:#F77F00;line-height:1.5;">
-        ℹ️ 数据仅保存在当前设备浏览器中，清除后无法恢复。首次访问会自动加载演示数据。
+        ℹ️ 数据保存在当前设备浏览器中。配置云同步后，iPad/iPhone 数据自动互通。
       </div>
+
+      <!-- 云同步状态 -->
+      <div style="padding:12px;background:#F0F9FF;border-radius:8px;border:1px solid #BAE6FD;">
+        <div class="font-bold mb-1" style="font-size:13px;">☁️ 云同步状态</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:13px;color:${syncStatus.color};">${syncStatus.icon} ${syncStatus.text}</span>
+          ${hasToken ? `
+            <div>
+              <button class="btn btn-default btn-sm" onclick="CloudSync.push().then(r => { UI.closeModal(); toast(r.action==='pushed'?'已同步到云端':'同步失败: '+r.msg, r.action==='pushed'?'success':'error'); });">🔄 立即同步</button>
+              <button class="btn btn-default btn-sm" onclick="CloudSync.setToken(''); Pages._showDataMenu();" style="margin-left:4px;">解除绑定</button>
+            </div>
+          ` : `
+            <button class="btn btn-primary btn-sm" onclick="Pages._setupCloudSync()">🔗 配置同步</button>
+          `}
+        </div>
+      </div>
+
       <div style="padding:16px;background:#F8F9FA;border-radius:8px;">
         <div class="font-bold mb-2">📊 数据概况</div>
         <div id="dataOverview"></div>
@@ -1361,6 +1524,47 @@ Pages._showDataMenu = function() {
     const names = { dailySales:'营业记录', expenses:'支出记录', incomes:'收入记录', purchases:'进货记录', suppliers:'供应商', inventory:'库存', employees:'员工', foodSafety:'食安记录', equipment:'设备', contracts:'合同', licenses:'证照', complaints:'投诉', badReviews:'差评', cashflow:'现金流' };
     return `<div style="display:inline-block;margin:4px;padding:4px 10px;background:#fff;border-radius:6px;font-size:12px;">${names[t]||t}: <strong>${count}</strong></div>`;
   }).join('');
+};
+
+// 配置云同步：输入 GitHub Token
+Pages._setupCloudSync = function() {
+  UI.modal('配置云同步', `
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div style="font-size:13px;color:var(--text-muted);line-height:1.6;">
+        <p>配置后，iPad 和 iPhone 数据自动同步。</p>
+        <p style="margin-top:8px;"><strong>获取 Token 步骤：</strong></p>
+        <ol style="margin:4px 0 0 16px;font-size:12px;">
+          <li>打开 <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></li>
+          <li>点击「Generate new token (classic)」</li>
+          <li>只勾选 <code>gist</code> 权限</li>
+          <li>点击生成，复制 token</li>
+        </ol>
+      </div>
+      <div class="form-group">
+        <label>GitHub Token</label>
+        <input type="password" class="form-control" id="githubTokenInput" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" style="font-family:monospace;">
+      </div>
+    </div>
+  `, `
+    <button class="btn btn-default" onclick="UI.closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="Pages._saveCloudToken()">保存并同步</button>
+  `);
+};
+
+Pages._saveCloudToken = function() {
+  const token = document.getElementById('githubTokenInput').value.trim();
+  if (!token) { toast('请输入 Token', 'error'); return; }
+  if (!token.startsWith('ghp_') && !token.startsWith('github_pat_')) {
+    toast('Token 格式不正确，应以 ghp_ 或 github_pat_ 开头', 'error'); return;
+  }
+  CloudSync.setToken(token);
+  UI.closeModal();
+  toast('Token 已保存，正在同步...', 'info');
+  CloudSync.push().then(r => {
+    if (r.action === 'pushed') toast('云端同步成功！现在其他设备可以拉取数据了', 'success');
+    else if (r.action === 'bad_token') { CloudSync.setToken(''); toast('Token 无效，请重新输入', 'error'); }
+    else toast('同步失败：' + (r.msg || '未知错误'), 'error');
+  });
 };
 
 Pages._clearAllData = function() {
@@ -5357,6 +5561,14 @@ const AlertCenter = {
         SeedData.generate();
         localStorage.setItem('hxx_mis_hasVisited', '1');
       }
+
+      // 尝试从云端拉取最新数据
+      CloudSync.autoPull().then(pulled => {
+        if (pulled) {
+          console.log('数据已从云端更新');
+          App.navigate(App.currentPage);
+        }
+      });
 
       App.init();
     });
