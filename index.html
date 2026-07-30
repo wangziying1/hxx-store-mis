@@ -948,9 +948,9 @@ function confirmDialog(msg, callback) {
 
 /* ===== 云端同步 - GitHub Gist ===== */
 const CloudSync = {
-  GIST_ID: 'c401ba2dff8bf0c9abdb1f241aadbd96',
-  GIST_RAW: 'https://gist.githubusercontent.com/wangziying1/c401ba2dff8bf0c9abdb1f241aadbd96/raw/hxx_store_data.json',
-  GIST_API: 'https://api.github.com/gists/c401ba2dff8bf0c9abdb1f241aadbd96',
+  GIST_ID: '2e6730b1e8526e8c1057e0fa9be7dab3',
+  GIST_RAW: 'https://gist.githubusercontent.com/wangziying1/2e6730b1e8526e8c1057e0fa9be7dab3/raw/hxx_store_data.json',
+  GIST_API: 'https://api.github.com/gists/2e6730b1e8526e8c1057e0fa9be7dab3',
 
   // 所有需要同步的数据表
   SYNC_TABLES: ['dailySales','expenses','incomes','purchases','suppliers','inventory',
@@ -995,16 +995,31 @@ const CloudSync = {
     return true;
   },
 
-  // 从 Gist 拉取数据（不需要 token，公开 Gist 可直接读）
+  // 从 Gist 拉取数据（私有 Gist 需要 token）
   async pull() {
+    const token = this.getToken();
+    if (!token) return { action: 'no_token' };
+
     try {
-      const resp = await fetch(this.GIST_RAW + '?t=' + Date.now());
+      // 先获取 Gist 元数据，拿到 raw_url
+      const metaResp = await fetch(this.GIST_API, {
+        headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github.v3+json' }
+      });
+      if (!metaResp.ok) {
+        if (metaResp.status === 401 || metaResp.status === 404) { this.setToken(''); return { action: 'bad_token' }; }
+        throw new Error('HTTP ' + metaResp.status);
+      }
+      const meta = await metaResp.json();
+      const rawUrl = meta.files['hxx_store_data.json']?.raw_url;
+      if (!rawUrl) return { action: 'no_data' };
+
+      // 拉取原始数据
+      const resp = await fetch(rawUrl + '?t=' + Date.now());
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
-      if (!data._updated) return null;
+      if (!data._updated) return { action: 'no_data' };
 
       const localUpdated = localStorage.getItem('hxx_mis_lastSync');
-      // 如果云端数据比本地新，或者本地没有同步记录，则拉取
       if (!localUpdated || data._updated > localUpdated) {
         this.importData(data);
         localStorage.setItem('hxx_mis_lastSync', data._updated);
@@ -1014,7 +1029,7 @@ const CloudSync = {
       return { action: 'uptodate', time: localUpdated };
     } catch(e) {
       console.warn('CloudSync pull failed:', e.message);
-      return null;
+      return { action: 'error', msg: e.message };
     }
   },
 
