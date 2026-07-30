@@ -4015,9 +4015,49 @@ Pages.foodSafety = function(container) {
   const completedTypes = todayRecords.map(r => r.type);
 
   let html = `
+    <div class="time-tabs" style="margin-bottom:16px;">
+      <div class="time-tab active" onclick="Pages._foodSafetyTab('daily', this)">📋 日台账</div>
+      <div class="time-tab" onclick="Pages._foodSafetyTab('week', this)">📊 周报</div>
+      <div class="time-tab" onclick="Pages._foodSafetyTab('month', this)">📅 月报</div>
+      <div class="time-tab" onclick="Pages._foodSafetyTab('year', this)">📆 年报</div>
+    </div>
+    <div id="foodSafetyReportArea"></div>
+  `;
+  container.innerHTML = html;
+
+  // 默认显示日报
+  Pages._foodSafetyRenderDaily(records, types, today, todayRecords, completedTypes);
+};
+
+// Tab 切换
+Pages._foodSafetyTab = function(mode, el) {
+  document.querySelectorAll('.time-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  const records = DB.get('foodSafety', []);
+  records.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const today = Utils.today();
+
+  if (mode === 'daily') {
+    const todayRecords = records.filter(r => r.date === today);
+    const completedTypes = todayRecords.map(r => r.type);
+    const types = ['晨检','冰箱温度','消毒记录','留样记录','垃圾处理','虫害检查','紫外线消毒','健康证','培训记录'];
+    Pages._foodSafetyRenderDaily(records, types, today, todayRecords, completedTypes);
+  } else if (mode === 'week') {
+    Pages._foodSafetyRenderReport(records, 'week', '本周');
+  } else if (mode === 'month') {
+    Pages._foodSafetyRenderReport(records, 'month', '本月');
+  } else if (mode === 'year') {
+    Pages._foodSafetyRenderReport(records, 'year', '本年');
+  }
+};
+
+// 日报（原逻辑）
+Pages._foodSafetyRenderDaily = function(records, types, today, todayRecords, completedTypes) {
+  const area = document.getElementById('foodSafetyReportArea');
+  let html = `
     <div class="card">
       <div class="card-header">
-        <div class="card-title">🛡️ 食品安全台账 - 今日(${today})完成情况</div>
+        <div class="card-title">🛡️ 今日(${today})完成情况</div>
         <button class="btn btn-primary" onclick="Pages._editFoodSafety()">+ 添加记录</button>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-bottom:16px;">
@@ -4058,7 +4098,202 @@ Pages.foodSafety = function(container) {
     html += '</tbody></table></div>';
   }
   html += '</div>';
-  container.innerHTML = html;
+  area.innerHTML = html;
+};
+
+// 周报/月报/年报
+Pages._foodSafetyRenderReport = function(records, mode, label) {
+  const area = document.getElementById('foodSafetyReportArea');
+  const today = Utils.today();
+  const now = new Date();
+
+  // 确定日期范围
+  let startDate, endDate;
+  if (mode === 'week') {
+    const day = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+    startDate = Utils.formatDate(monday);
+    endDate = today;
+  } else if (mode === 'month') {
+    startDate = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    endDate = today;
+  } else {
+    startDate = `${now.getFullYear()}-01-01`;
+    endDate = today;
+  }
+
+  const periodRecords = records.filter(r => r.date >= startDate && r.date <= endDate);
+  const types = ['晨检','冰箱温度','消毒记录','留样记录','垃圾处理','虫害检查','紫外线消毒','健康证','培训记录'];
+  const totalDays = Utils.daysBetween(startDate, endDate) + 1;
+  const maxRecords = totalDays * types.length;
+
+  // 按类型统计
+  const typeStats = {};
+  types.forEach(t => { typeStats[t] = { total: 0, normal: 0, abnormal: 0 }; });
+  periodRecords.forEach(r => {
+    if (typeStats[r.type]) {
+      typeStats[r.type].total++;
+      if (r.result === '正常') typeStats[r.type].normal++;
+      else if (r.result === '异常') typeStats[r.type].abnormal++;
+    }
+  });
+
+  // 异常记录
+  const abnormalRecords = periodRecords.filter(r => r.result === '异常');
+
+  // 整体完成率
+  const completionRate = maxRecords > 0 ? (periodRecords.length / maxRecords * 100).toFixed(1) : '0.0';
+
+  // 按日期统计完成数
+  const dateMap = {};
+  periodRecords.forEach(r => {
+    dateMap[r.date] = (dateMap[r.date] || 0) + 1;
+  });
+
+  let html = `
+    <div class="card">
+      <div class="card-header"><div class="card-title">📊 ${label}食品安全报告 (${startDate} ~ ${endDate})</div></div>
+      <div class="stat-grid" style="margin-bottom:16px;">
+        <div class="stat-card ${parseFloat(completionRate) >= 90 ? 'success' : parseFloat(completionRate) >= 70 ? 'warning' : 'danger'}">
+          <div class="stat-icon">📋</div>
+          <div class="stat-label">整体完成率</div>
+          <div class="stat-value">${completionRate}%</div>
+          <div style="font-size:11px;color:var(--text-muted);">${periodRecords.length} / ${maxRecords} 项</div>
+        </div>
+        <div class="stat-card info">
+          <div class="stat-icon">📅</div>
+          <div class="stat-label">统计天数</div>
+          <div class="stat-value">${totalDays}<small> 天</small></div>
+        </div>
+        <div class="stat-card ${abnormalRecords.length > 0 ? 'danger' : 'success'}">
+          <div class="stat-icon">⚠️</div>
+          <div class="stat-label">异常项</div>
+          <div class="stat-value">${abnormalRecords.length}<small> 项</small></div>
+        </div>
+        <div class="stat-card success">
+          <div class="stat-icon">✅</div>
+          <div class="stat-label">正常项</div>
+          <div class="stat-value">${periodRecords.filter(r => r.result === '正常').length}<small> 项</small></div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <div class="card-title" style="margin-bottom:12px;">📈 各类型完成次数</div>
+          <div class="chart-container" style="height:260px;"><canvas id="fsTypeChart"></canvas></div>
+        </div>
+        <div>
+          <div class="card-title" style="margin-bottom:12px;">🎯 各类型达标率</div>
+          <div class="chart-container" style="height:260px;"><canvas id="fsRateChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 异常记录列表
+  if (abnormalRecords.length > 0) {
+    html += `
+      <div class="card">
+        <div class="card-header"><div class="card-title" style="color:var(--danger);">⚠️ 异常记录</div></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr>
+          <th>日期</th><th>类型</th><th>内容</th><th>结果</th><th>负责人</th><th>备注</th>
+        </tr></thead><tbody>
+        ${abnormalRecords.map(r => `<tr>
+          <td>${r.date}</td>
+          <td><span class="badge badge-info">${r.type || '-'}</span></td>
+          <td>${Utils.esc(r.content || '-')}</td>
+          <td><span class="badge badge-danger">异常</span></td>
+          <td>${r.manager || '-'}</td>
+          <td>${Utils.esc(r.remark || '-')}</td>
+        </tr>`).join('')}
+        </tbody></table></div>
+      </div>
+    `;
+  }
+
+  // 每日完成情况表
+  const dates = [];
+  for (let i = totalDays - 1; i >= 0; i--) {
+    const d = Utils.formatDate(Utils.addDays(endDate, -i));
+    dates.push({ date: d, count: dateMap[d] || 0 });
+  }
+
+  html += `
+    <div class="card">
+      <div class="card-header"><div class="card-title">📋 每日完成明细</div></div>
+      <div class="table-wrap"><table class="data-table"><thead><tr>
+        <th>日期</th><th>完成项数</th><th>完成率</th><th>状态</th>
+      </tr></thead><tbody>
+      ${dates.map(d => {
+        const rate = (d.count / types.length * 100).toFixed(0);
+        let badge = rate >= 90 ? 'badge-success' : rate >= 60 ? 'badge-warning' : 'badge-danger';
+        return `<tr>
+          <td>${d.date}</td>
+          <td>${d.count} / ${types.length}</td>
+          <td>${rate}%</td>
+          <td><span class="badge ${badge}">${rate >= 90 ? '达标' : rate >= 60 ? '部分完成' : '未达标'}</span></td>
+        </tr>`;
+      }).join('')}
+      </tbody></table></div>
+    </div>
+  `;
+
+  area.innerHTML = html;
+
+  // 绘制图表
+  setTimeout(() => {
+    // 各类型完成次数柱状图
+    const ctx1 = document.getElementById('fsTypeChart');
+    if (ctx1) {
+      App.destroyChart('fsTypeChart');
+      App.chartInstances['fsTypeChart'] = new Chart(ctx1, {
+        type: 'bar',
+        data: {
+          labels: types,
+          datasets: [{
+            label: '正常', data: types.map(t => typeStats[t].normal),
+            backgroundColor: '#06D6A0', borderRadius: 4
+          }, {
+            label: '异常', data: types.map(t => typeStats[t].abnormal),
+            backgroundColor: '#EF476F', borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom' } },
+          scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } }
+        }
+      });
+    }
+
+    // 达标率柱状图
+    const ctx2 = document.getElementById('fsRateChart');
+    if (ctx2) {
+      App.destroyChart('fsRateChart');
+      const expectedPerType = totalDays; // 每天每个类型一次
+      const rates = types.map(t => {
+        const done = typeStats[t].normal + typeStats[t].abnormal;
+        return expectedPerType > 0 ? (done / expectedPerType * 100) : 0;
+      });
+      const colors = rates.map(r => r >= 90 ? '#06D6A0' : r >= 70 ? '#FFD166' : '#EF476F');
+      App.chartInstances['fsRateChart'] = new Chart(ctx2, {
+        type: 'bar',
+        data: {
+          labels: types,
+          datasets: [{
+            label: '达标率 %', data: rates,
+            backgroundColor: colors, borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } }
+        }
+      });
+    }
+  }, 200);
 };
 
 Pages._editFoodSafety = function(id) {
@@ -4620,6 +4855,14 @@ const App = {
   currentPage: 'dashboard',
   chartInstances: {},
 
+  // 安全销毁指定图表
+  destroyChart(key) {
+    if (this.chartInstances[key]) {
+      try { this.chartInstances[key].destroy(); } catch(e) {}
+      delete this.chartInstances[key];
+    }
+  },
+
   // 导航菜单配置
   menu: [
     { group: '核心驾驶舱', items: [
@@ -4717,8 +4960,6 @@ const App = {
     // 销毁旧图表
     Object.values(this.chartInstances).forEach(c => { try { c.destroy(); } catch(e) {} });
     this.chartInstances = {};
-
-    // 渲染页面
     const content = document.getElementById('content');
     content.innerHTML = '';
 
