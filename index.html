@@ -1057,7 +1057,7 @@ const CloudSync = {
   // 所有需要同步的数据表
   SYNC_TABLES: ['dailySales','expenses','incomes','purchases','suppliers','inventory',
     'employees','foodSafety','equipment','contracts','licenses','complaints','badReviews',
-    'cashflow','products','settings','fixedExpenses'],
+    'cashflow','products','settings','fixedExpenses','costMaterials','costRecipes'],
 
   _token: null,
   _syncing: false,
@@ -3771,6 +3771,427 @@ Pages._printReport = function(title) {
 /* pages_inventory.js */
 /* ===== 进销存模块：进货台账、供应商、库存、采购计划 ===== */
 
+/* ========== 食材成本计算器（独立模块，不参与任何收支计算） ========== */
+
+Pages.costCalc = function(container) {
+  let html = `
+    <div class="text-muted text-sm" style="padding:0 4px 12px;">💡 独立成本计算工具，不参与任何收支利润计算。设置食材采购规格和菜品配方，自动算出每份成本。</div>
+    <div class="time-tabs" style="margin-bottom:16px;">
+      <div class="time-tab active" onclick="Pages._costTab('materials', this)">🥘 食材库</div>
+      <div class="time-tab" onclick="Pages._costTab('recipes', this)">🍳 菜品配方</div>
+      <div class="time-tab" onclick="Pages._costTab('summary', this)">📊 成本汇总</div>
+    </div>
+    <div id="costCalcArea"></div>
+  `;
+  container.innerHTML = html;
+  Pages._costRenderMaterials();
+};
+
+Pages._costTab = function(tab, el) {
+  document.querySelectorAll('.time-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  if (tab === 'materials') Pages._costRenderMaterials();
+  else if (tab === 'recipes') Pages._costRenderRecipes();
+  else Pages._costRenderSummary();
+};
+
+/* ---- 食材库 ---- */
+
+Pages._costRenderMaterials = function() {
+  const materials = DB.get('costMaterials', []);
+  const area = document.getElementById('costCalcArea');
+  let html = `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🥘 食材库（采购规格 → 单克成本）</div>
+        <button class="btn btn-primary" onclick="Pages._editCostMaterial()">+ 添加食材</button>
+      </div>
+      <div class="text-muted text-sm" style="padding:4px 16px 8px;">填写采购规格（如一袋25kg、一箱18袋），系统自动换算每克成本</div>
+  `;
+  if (materials.length === 0) {
+    html += `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">暂无食材，点击右上角添加</div></div>`;
+  } else {
+    html += `<div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>食材名称</th><th>采购规格</th><th>总净重</th><th>采购金额</th><th>单克成本</th><th>操作</th>
+    </tr></thead><tbody>`;
+    materials.forEach(m => {
+      const gramCost = m.totalGrams > 0 ? (m.totalPrice / m.totalGrams) : 0;
+      html += `<tr>
+        <td class="font-bold">${Utils.esc(m.name)}</td>
+        <td>${Utils.esc(m.spec || '-')}</td>
+        <td>${(m.totalGrams || 0).toLocaleString()} 克</td>
+        <td class="text-primary font-bold">¥${Utils.money(m.totalPrice || 0)}</td>
+        <td><span class="badge badge-success">¥${gramCost.toFixed(4)}/克</span></td>
+        <td>
+          <button class="btn btn-default btn-sm" onclick="Pages._editCostMaterial(${m.id})">编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="Pages._deleteCostMaterial(${m.id})">删除</button>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+  area.innerHTML = html;
+};
+
+Pages._editCostMaterial = function(id) {
+  const m = id ? DB.findById('costMaterials', id) : {};
+  const body = `
+    ${UI.field('食材名称', 'name', 'text', m.name || '', 'required placeholder="如：米粉、微辣酱、打包盒"')}
+    ${UI.field('采购规格说明', 'spec', 'text', m.spec || '', 'placeholder="如：一袋25kg / 一箱18袋 / 一箱400包"')}
+    <div class="form-row">
+      <div class="form-group" style="flex:1;">
+        <label>采购数量</label>
+        <input type="number" class="form-control" name="packCount" value="${m.packCount || 1}" step="0.01" oninput="Pages._calcMaterialGrams()">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>单位</label>
+        <select class="form-control" name="packUnit" onchange="Pages._calcMaterialGrams()">
+          <option value="袋" ${m.packUnit==='袋'?'selected':''}>袋</option>
+          <option value="箱" ${m.packUnit==='箱'?'selected':''}>箱</option>
+          <option value="包" ${m.packUnit==='包'?'selected':''}>包</option>
+          <option value="桶" ${m.packUnit==='桶'?'selected':''}>桶</option>
+          <option value="瓶" ${m.packUnit==='瓶'?'selected':''}>瓶</option>
+          <option value="件" ${m.packUnit==='件'?'selected':''}>件</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>采购金额(元)</label>
+        <input type="number" class="form-control" name="totalPrice" value="${m.totalPrice || ''}" required step="0.01" oninput="Pages._calcMaterialGrams()">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1;">
+        <label>每${m.packUnit || '袋'}净重数值</label>
+        <input type="number" class="form-control" name="unitWeight" value="${m.unitWeight || ''}" step="0.01" oninput="Pages._calcMaterialGrams()" placeholder="如25">
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>重量单位</label>
+        <select class="form-control" name="weightUnit" onchange="Pages._calcMaterialGrams()">
+          <option value="kg" ${m.weightUnit==='kg'?'selected':''}>千克(kg)</option>
+          <option value="g" ${m.weightUnit==='g'?'selected':''}>克(g)</option>
+          <option value="斤" ${m.weightUnit==='斤'?'selected':''}>斤</option>
+          <option value="包" ${m.weightUnit==='包'?'selected':''}>包/个（按个计）</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;">
+        <label>总净重(克)</label>
+        <input type="text" class="form-control" name="totalGrams" value="${m.totalGrams || ''}" readonly style="background:#f5f5f5;">
+      </div>
+    </div>
+    <div id="materialPreview" style="padding:8px 12px;background:var(--orange-light,#FFF3E0);border-radius:8px;font-size:13px;color:#92400E;">💡 填写数量、金额和净重后自动计算</div>
+  `;
+  const footer = `
+    <button class="btn btn-default" onclick="UI.closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="Pages._saveCostMaterial(${id || ''})">保存</button>
+  `;
+  UI.modal(id ? '编辑食材' : '添加食材', body, footer);
+  Pages._calcMaterialGrams();
+};
+
+Pages._calcMaterialGrams = function() {
+  const packCount = parseFloat(document.querySelector('[name="packCount"]').value) || 0;
+  const unitWeight = parseFloat(document.querySelector('[name="unitWeight"]').value) || 0;
+  const weightUnit = document.querySelector('[name="weightUnit"]').value;
+  const totalPrice = parseFloat(document.querySelector('[name="totalPrice"]').value) || 0;
+  const packUnit = document.querySelector('[name="packUnit"]').value;
+
+  let totalGrams = 0;
+  if (weightUnit === 'kg') totalGrams = packCount * unitWeight * 1000;
+  else if (weightUnit === 'g') totalGrams = packCount * unitWeight;
+  else if (weightUnit === '斤') totalGrams = packCount * unitWeight * 500;
+  else if (weightUnit === '包') totalGrams = packCount * unitWeight; // 按个/包计，unitWeight=1表示1个
+
+  document.querySelector('[name="totalGrams"]').value = totalGrams.toFixed(0);
+
+  const preview = document.getElementById('materialPreview');
+  if (totalGrams > 0 && totalPrice > 0) {
+    const gramCost = totalPrice / totalGrams;
+    preview.innerHTML = `📊 <strong>${packCount}${packUnit}</strong> × ${unitWeight}${weightUnit} = ${totalGrams.toLocaleString()}克<br>💰 采购金额 ¥${totalPrice.toFixed(2)}<br>📐 单克成本：<strong style="color:var(--primary);font-size:16px;">¥${gramCost.toFixed(4)}/克</strong>`;
+  } else {
+    preview.innerHTML = '💡 填写数量、金额和净重后自动计算';
+  }
+};
+
+Pages._saveCostMaterial = function(id) {
+  const form = document.querySelector('.modal-body');
+  const data = {};
+  form.querySelectorAll('[name]').forEach(el => { data[el.name] = el.value; });
+  if (!data.name) { toast('请填写食材名称', 'error'); return; }
+  data.packCount = parseFloat(data.packCount) || 1;
+  data.unitWeight = parseFloat(data.unitWeight) || 0;
+  data.totalPrice = parseFloat(data.totalPrice) || 0;
+  data.totalGrams = parseFloat(data.totalGrams) || 0;
+  if (id) { DB.update('costMaterials', id, data); toast('食材已更新', 'success'); }
+  else { DB.add('costMaterials', data); toast('食材已添加', 'success'); }
+  UI.closeModal();
+  Pages._costRenderMaterials();
+};
+
+Pages._deleteCostMaterial = function(id) {
+  UI.confirm('确定删除这个食材吗？关联的菜品配方需手动调整。', () => {
+    DB.remove('costMaterials', id);
+    toast('已删除', 'success');
+    Pages._costRenderMaterials();
+  });
+};
+
+/* ---- 菜品配方 ---- */
+
+Pages._costRenderRecipes = function() {
+  const recipes = DB.get('costRecipes', []);
+  const area = document.getElementById('costCalcArea');
+  let html = `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🍳 菜品配方（每份用量 → 每份成本）</div>
+        <button class="btn btn-primary" onclick="Pages._editCostRecipe()">+ 添加菜品</button>
+      </div>
+      <div class="text-muted text-sm" style="padding:4px 16px 8px;">设置每道菜用了哪些食材、各多少克，系统自动算每份成本</div>
+  `;
+  if (recipes.length === 0) {
+    html += `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">暂无菜品，点击右上角添加</div></div>`;
+  } else {
+    html += `<div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>菜品名称</th><th>配方明细</th><th>每份成本</th><th>建议售价</th><th>毛利率</th><th>操作</th>
+    </tr></thead><tbody>`;
+    recipes.forEach(r => {
+      const cost = Pages._calcRecipeCost(r);
+      const price = r.price || 0;
+      const profitRate = price > 0 ? ((price - cost) / price * 100).toFixed(1) : '-';
+      const profitColor = price > 0 ? (profitRate >= 60 ? 'success' : (profitRate >= 40 ? 'warning' : 'danger')) : 'default';
+      html += `<tr>
+        <td class="font-bold">${Utils.esc(r.name)}</td>
+        <td class="text-sm">${(r.items || []).map(i => `${Utils.esc(i.materialName)} ${i.grams}克`).join('、') || '-'}</td>
+        <td><span class="badge badge-success">¥${cost.toFixed(2)}</span></td>
+        <td>${price > 0 ? '¥' + Utils.money(price) : '<span class="text-muted">未设</span>'}</td>
+        <td>${price > 0 ? `<span class="badge badge-${profitColor}">${profitRate}%</span>` : '<span class="text-muted">-</span>'}</td>
+        <td>
+          <button class="btn btn-default btn-sm" onclick="Pages._editCostRecipe(${r.id})">编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="Pages._deleteCostRecipe(${r.id})">删除</button>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+  area.innerHTML = html;
+};
+
+Pages._calcRecipeCost = function(recipe) {
+  const materials = DB.get('costMaterials', []);
+  let cost = 0;
+  (recipe.items || []).forEach(item => {
+    const mat = materials.find(m => m.id === item.materialId);
+    if (mat && mat.totalGrams > 0) {
+      const gramCost = mat.totalPrice / mat.totalGrams;
+      cost += gramCost * (item.grams || 0);
+    }
+  });
+  return cost;
+};
+
+Pages._editCostRecipe = function(id) {
+  const r = id ? DB.findById('costRecipes', id) : {};
+  const materials = DB.get('costMaterials', []);
+  if (materials.length === 0) {
+    UI.modal('提示', '<p style="padding:16px;text-align:center;">请先在「食材库」添加食材，再创建菜品配方。</p>');
+    return;
+  }
+  const items = r.items || [];
+  const body = `
+    <div class="form-row">
+      ${UI.field('菜品名称', 'name', 'text', r.name || '', 'required placeholder="如：经典牛肉炒米粉"')}
+      ${UI.field('建议售价(元)', 'price', 'number', r.price || '', 'step="0.01" placeholder="如：22"')}
+    </div>
+    <div class="form-group">
+      <label>配方明细（食材 + 每份用量克数）</label>
+      <div id="recipeItems"></div>
+      <button class="btn btn-default btn-sm" style="margin-top:8px;" onclick="Pages._addRecipeItem()">+ 添加食材</button>
+    </div>
+    <div id="recipePreview" style="padding:8px 12px;background:var(--orange-light,#FFF3E0);border-radius:8px;font-size:13px;color:#92400E;">💡 添加食材并填写克数后自动计算成本</div>
+  `;
+  const footer = `
+    <button class="btn btn-default" onclick="UI.closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="Pages._saveCostRecipe(${id || ''})">保存</button>
+  `;
+  UI.modal(id ? '编辑菜品' : '添加菜品', body, footer, 'lg');
+  Pages._recipeItems = items.map(i => ({...i}));
+  Pages._renderRecipeItems();
+};
+
+Pages._addRecipeItem = function(materialId, grams) {
+  if (!Pages._recipeItems) Pages._recipeItems = [];
+  Pages._recipeItems.push({ materialId: materialId || '', grams: grams || 0 });
+  Pages._renderRecipeItems();
+};
+
+Pages._renderRecipeItems = function() {
+  const materials = DB.get('costMaterials', []);
+  const list = document.getElementById('recipeItems');
+  if (!list) return;
+  if (Pages._recipeItems.length === 0) {
+    list.innerHTML = '<div class="text-muted text-sm" style="padding:8px 0;">点击下方按钮添加食材</div>';
+    Pages._updateRecipePreview();
+    return;
+  }
+  list.innerHTML = Pages._recipeItems.map((item, i) => {
+    const mat = materials.find(m => m.id === item.materialId);
+    const lineCost = mat && mat.totalGrams > 0 ? (mat.totalPrice / mat.totalGrams * (item.grams || 0)) : 0;
+    return `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <select class="form-control" style="flex:2;" onchange="Pages._updateRecipeItem(${i},'materialId',this.value)">
+        <option value="">选择食材</option>
+        ${materials.map(m => `<option value="${m.id}" ${item.materialId === m.id ? 'selected' : ''}>${Utils.esc(m.name)} (${m.totalGrams}克/¥${Utils.money(m.totalPrice)})</option>`).join('')}
+      </select>
+      <input type="number" class="form-control" style="flex:1;" placeholder="克数" value="${item.grams || ''}" step="0.1" oninput="Pages._updateRecipeItem(${i},'grams',this.value)">
+      <span style="flex:0 0 80px;font-size:12px;color:#065F46;">¥${lineCost.toFixed(2)}</span>
+      <button class="btn btn-danger btn-sm" onclick="Pages._removeRecipeItem(${i})" style="flex:0 0 auto;">✕</button>
+    </div>`;
+  }).join('');
+  Pages._updateRecipePreview();
+};
+
+Pages._updateRecipeItem = function(idx, field, val) {
+  if (!Pages._recipeItems || !Pages._recipeItems[idx]) return;
+  if (field === 'grams') Pages._recipeItems[idx].grams = parseFloat(val) || 0;
+  else Pages._recipeItems[idx][field] = val;
+  // 更新对应行的小计
+  Pages._renderRecipeItems();
+};
+
+Pages._removeRecipeItem = function(idx) {
+  Pages._recipeItems.splice(idx, 1);
+  Pages._renderRecipeItems();
+};
+
+Pages._updateRecipePreview = function() {
+  const materials = DB.get('costMaterials', []);
+  let totalCost = 0;
+  (Pages._recipeItems || []).forEach(item => {
+    const mat = materials.find(m => m.id === item.materialId);
+    if (mat && mat.totalGrams > 0) totalCost += (mat.totalPrice / mat.totalGrams) * (item.grams || 0);
+  });
+  const priceInput = document.querySelector('[name="price"]');
+  const price = parseFloat(priceInput?.value) || 0;
+  const preview = document.getElementById('recipePreview');
+  if (totalCost > 0) {
+    let html = `💰 每份成本：<strong style="color:var(--primary);font-size:18px;">¥${totalCost.toFixed(2)}</strong>`;
+    if (price > 0) {
+      const profit = price - totalCost;
+      const rate = (profit / price * 100).toFixed(1);
+      const color = rate >= 60 ? '#065F46' : (rate >= 40 ? '#92400E' : '#991B1B');
+      html += ` | 售价 ¥${price.toFixed(2)} | 毛利 ¥${profit.toFixed(2)} | 毛利率 <strong style="color:${color}">${rate}%</strong>`;
+    }
+    preview.innerHTML = html;
+  } else {
+    preview.innerHTML = '💡 添加食材并填写克数后自动计算成本';
+  }
+};
+
+Pages._saveCostRecipe = function(id) {
+  const name = document.querySelector('[name="name"]').value.trim();
+  if (!name) { toast('请填写菜品名称', 'error'); return; }
+  const price = parseFloat(document.querySelector('[name="price"]').value) || 0;
+  const items = (Pages._recipeItems || []).filter(i => i.materialId && i.grams > 0);
+  // 附加食材名称快照
+  const materials = DB.get('costMaterials', []);
+  items.forEach(i => {
+    const mat = materials.find(m => m.id === i.materialId);
+    i.materialName = mat ? mat.name : '';
+  });
+  const data = { name, price, items };
+  if (id) { DB.update('costRecipes', id, data); toast('菜品已更新', 'success'); }
+  else { DB.add('costRecipes', data); toast('菜品已添加', 'success'); }
+  UI.closeModal();
+  Pages._costRenderRecipes();
+};
+
+Pages._deleteCostRecipe = function(id) {
+  UI.confirm('确定删除这个菜品配方吗？', () => {
+    DB.remove('costRecipes', id);
+    toast('已删除', 'success');
+    Pages._costRenderRecipes();
+  });
+};
+
+/* ---- 成本汇总 ---- */
+
+Pages._costRenderSummary = function() {
+  const recipes = DB.get('costRecipes', []);
+  const area = document.getElementById('costCalcArea');
+  let html = '<div class="card"><div class="card-header"><div class="card-title">📊 成本汇总</div></div>';
+
+  if (recipes.length === 0) {
+    html += '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">暂无菜品配方，请先在「菜品配方」中添加</div></div></div>';
+    area.innerHTML = html;
+    return;
+  }
+
+  // 汇总卡片
+  const allCosts = recipes.map(r => ({ name: r.name, cost: Pages._calcRecipeCost(r), price: r.price || 0, items: r.items || [] }));
+  const totalCost = allCosts.reduce((s, r) => s + r.cost, 0);
+  const avgCost = totalCost / recipes.length;
+  const pricedItems = allCosts.filter(r => r.price > 0);
+  const avgProfitRate = pricedItems.length > 0 ? (pricedItems.reduce((s, r) => s + (r.price - r.cost) / r.price, 0) / pricedItems.length * 100) : 0;
+
+  html += `<div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px;">
+    <div class="stat-card primary"><div class="stat-icon">🍳</div><div class="stat-label">菜品数</div><div class="stat-value">${recipes.length}</div></div>
+    <div class="stat-card warning"><div class="stat-icon">💸</div><div class="stat-label">平均成本</div><div class="stat-value">¥${avgCost.toFixed(2)}</div></div>
+    <div class="stat-card success"><div class="stat-icon">📈</div><div class="stat-label">平均毛利率</div><div class="stat-value">${avgProfitRate.toFixed(1)}%</div></div>
+    <div class="stat-card info"><div class="stat-icon">💰</div><div class="stat-label">总成本</div><div class="stat-value">¥${totalCost.toFixed(2)}</div></div>
+  </div>`;
+
+  // 明细表
+  html += '<div class="table-wrap"><table class="data-table"><thead><tr><th>菜品</th><th>配方明细</th><th>成本</th><th>售价</th><th>毛利</th><th>毛利率</th></tr></thead><tbody>';
+  allCosts.sort((a, b) => a.cost - b.cost).forEach(r => {
+    const profit = r.price - r.cost;
+    const rate = r.price > 0 ? (profit / r.price * 100).toFixed(1) : '-';
+    const rateColor = r.price > 0 ? (rate >= 60 ? 'success' : (rate >= 40 ? 'warning' : 'danger')) : 'default';
+    html += `<tr>
+      <td class="font-bold">${Utils.esc(r.name)}</td>
+      <td class="text-sm">${r.items.map(i => `${Utils.esc(i.materialName)} ${i.grams}g`).join('<br>') || '-'}</td>
+      <td class="text-danger font-bold">¥${r.cost.toFixed(2)}</td>
+      <td>${r.price > 0 ? '¥' + r.price.toFixed(2) : '<span class="text-muted">未设</span>'}</td>
+      <td class="${profit >= 0 ? 'text-success' : 'text-danger'}">${r.price > 0 ? '¥' + profit.toFixed(2) : '-'}</td>
+      <td>${r.price > 0 ? `<span class="badge badge-${rateColor}">${rate}%</span>` : '<span class="text-muted">-</span>'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+
+  // 食材用量排行
+  const materials = DB.get('costMaterials', []);
+  const matUsage = {};
+  recipes.forEach(r => {
+    (r.items || []).forEach(i => {
+      if (!matUsage[i.materialId]) matUsage[i.materialId] = { name: i.materialName || '', grams: 0, recipes: 0 };
+      matUsage[i.materialId].grams += (i.grams || 0);
+      matUsage[i.materialId].recipes += 1;
+    });
+  });
+  const sortedUsage = Object.entries(matUsage).sort((a, b) => b[1].grams - a[1].grams);
+  if (sortedUsage.length > 0) {
+    html += '<div class="section-title">📦 食材用量排行（每份合计）</div><div class="table-wrap"><table class="data-table"><thead><tr><th>排名</th><th>食材</th><th>每份合计用量</th><th>涉及菜品数</th><th>单克成本</th><th>合计成本</th></tr></thead><tbody>';
+    sortedUsage.forEach(([mid, u], i) => {
+      const mat = materials.find(m => String(m.id) === String(mid));
+      const gramCost = mat && mat.totalGrams > 0 ? (mat.totalPrice / mat.totalGrams) : 0;
+      const totalLineCost = gramCost * u.grams;
+      const medal = i === 0 ? '🥇' : (i === 1 ? '🥈' : (i === 2 ? '🥉' : (i + 1)));
+      html += `<tr>
+        <td class="font-bold">${medal}</td>
+        <td class="font-bold">${Utils.esc(u.name)}</td>
+        <td>${u.grams.toFixed(1)} 克</td>
+        <td>${u.recipes} 道</td>
+        <td>¥${gramCost.toFixed(4)}/克</td>
+        <td class="text-danger">¥${totalLineCost.toFixed(2)}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  html += '</div>';
+  area.innerHTML = html;
+};
+
 /* ========== 食品进货台账 ========== */
 Pages.purchases = function(container) {
   let purchases = DB.get('purchases', []);
@@ -5590,6 +6011,7 @@ const App = {
     ]},
     { group: '进销存管理', items: [
       { id: 'purchases', icon: '📦', label: '食品进货台账' },
+      { id: 'costCalc', icon: '🧮', label: '食材成本计算器' },
       { id: 'suppliers', icon: '🚚', label: '供应商管理' },
     ]},
     { group: '财务收支', items: [
