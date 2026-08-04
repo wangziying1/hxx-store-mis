@@ -706,6 +706,47 @@ textarea.form-control { resize: vertical; min-height: 60px; }
 .hidden { display: none !important; }
 .cursor-pointer { cursor: pointer; }
 
+/* ===== 个人记账模块样式 ===== */
+.pf-add-container { max-width: 500px; margin: 0 auto; }
+.pf-type-tabs { display: flex; gap: 0; margin-bottom: 16px; border-radius: var(--radius-sm); overflow: hidden; background: var(--border-light); }
+.pf-type-tab { flex: 1; padding: 10px; text-align: center; border: none; background: none; font-size: 14px; font-weight: 600; color: var(--text-secondary); cursor: pointer; transition: all 0.2s; }
+.pf-type-tab.active { background: var(--card-bg); color: var(--primary); box-shadow: var(--shadow-sm); }
+.pf-amount-display { text-align: center; padding: 20px 0; }
+.pf-amount-currency { font-size: 24px; color: var(--text-muted); vertical-align: top; }
+.pf-amount-value { font-size: 40px; font-weight: 800; color: var(--text); letter-spacing: -1px; }
+.pf-section-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; font-weight: 600; }
+.pf-category-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+.pf-category-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s; border: 2px solid transparent; }
+.pf-category-item:hover { background: var(--border-light); }
+.pf-category-item.selected { border-color: var(--primary); background: var(--primary-light); }
+.pf-cat-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.pf-category-item span { font-size: 11px; color: var(--text-secondary); }
+.pf-form-section { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.pf-form-row { display: flex; gap: 8px; align-items: center; }
+.pf-date-shortcuts { display: flex; gap: 4px; }
+.pf-date-btn { padding: 6px 10px; border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--card-bg); font-size: 12px; color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+.pf-date-btn:active { background: var(--primary-light); }
+.pf-keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border-radius: var(--radius-sm); overflow: hidden; margin-bottom: 16px; }
+.pf-key { padding: 16px; text-align: center; font-size: 22px; font-weight: 600; border: none; background: var(--card-bg); color: var(--text); cursor: pointer; transition: background 0.1s; }
+.pf-key:active { background: var(--border-light); }
+.pf-key-del { color: var(--text-muted); }
+.pf-save-btn { border-radius: var(--radius-sm); }
+.pf-tx-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border-light); cursor: pointer; }
+.pf-tx-item:last-child { border-bottom: none; }
+.pf-tx-item:active { background: var(--border-light); }
+.pf-tx-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.pf-tx-info { flex: 1; min-width: 0; }
+.pf-tx-name { font-size: 14px; font-weight: 500; }
+.pf-tx-sub { font-size: 11px; color: var(--text-muted); }
+.pf-tx-amount { font-size: 15px; font-weight: 700; white-space: nowrap; }
+.pf-date-group { font-size: 12px; color: var(--text-muted); padding: 8px 4px 4px; font-weight: 600; }
+.pf-progress-bar { width: 100%; height: 8px; background: var(--border-light); border-radius: 4px; overflow: hidden; }
+.pf-progress-fill { height: 100%; background: var(--green); border-radius: 4px; transition: width 0.3s; }
+.pf-progress-fill.warn { background: var(--orange); }
+.pf-progress-fill.over { background: var(--red); }
+.pf-emoji-pick, .pf-color-pick { cursor: pointer; transition: transform 0.1s; }
+.pf-emoji-pick:active, .pf-color-pick:active { transform: scale(0.9); }
+
   </style>
   <script>
 /* ===== Chart.js v4.4.0 ===== */
@@ -1082,6 +1123,8 @@ const CloudSync = {
     this.SYNC_TABLES.forEach(t => {
       data[t] = DB.get(t, []);
     });
+    // 个人记账数据（独立存储，一起同步）
+    data._personal = typeof PersonalDB !== 'undefined' ? PersonalDB.exportData() : {};
     return data;
   },
 
@@ -1094,6 +1137,11 @@ const CloudSync = {
       }
     });
     localStorage.setItem('hxx_mis_hasVisited', '1');
+    // 个人记账数据
+    if (jsonData._personal && typeof PersonalDB !== 'undefined') {
+      PersonalDB.importData(jsonData._personal);
+      localStorage.setItem('hxx_personal_initialized', '1');
+    }
     return true;
   },
 
@@ -6175,6 +6223,15 @@ const App = {
     { group: '智能助手', items: [
       { id: 'ai', icon: '🤖', label: 'AI 助手' },
     ]},
+    { group: '个人记账', items: [
+      { id: 'personalDashboard', icon: '🏠', label: '个人概览' },
+      { id: 'personalAdd', icon: '✏️', label: '记一笔' },
+      { id: 'personalTransactions', icon: '📋', label: '我的账单' },
+      { id: 'personalReports', icon: '📊', label: '收支报表' },
+      { id: 'personalBudget', icon: '🎯', label: '预算管理' },
+      { id: 'personalCategories', icon: '🏷️', label: '分类管理' },
+      { id: 'personalAccounts', icon: '💳', label: '账户管理' },
+    ]},
   ],
 
   init() {
@@ -6617,6 +6674,1376 @@ const AlertCenter = {
 
   </script>
   <script>
+/* ===== 个人记账模块 - 数据独立存储(localStorage 前缀 hxx_personal_)，与门店数据完全隔离 ===== */
+
+/* ---- 个人记账数据层 ---- */
+const PersonalDB = {
+  _prefix: 'hxx_personal_',
+
+  get(key, defaultValue) {
+    try {
+      const raw = localStorage.getItem(this._prefix + key);
+      return raw ? JSON.parse(raw) : (defaultValue !== undefined ? defaultValue : []);
+    } catch(e) { return defaultValue !== undefined ? defaultValue : []; }
+  },
+
+  set(key, value) {
+    localStorage.setItem(this._prefix + key, JSON.stringify(value));
+    if (typeof CloudSync !== 'undefined') CloudSync.autoPush();
+  },
+
+  uid() { return Date.now() + Math.floor(Math.random() * 10000); },
+
+  // 交易记录
+  getTransactions() { return this.get('transactions', []); },
+  addTransaction(tx) {
+    const list = this.getTransactions();
+    tx.id = tx.id || this.uid();
+    tx.createdAt = tx.createdAt || new Date().toISOString();
+    list.unshift(tx);
+    this.set('transactions', list);
+    return tx;
+  },
+  updateTransaction(id, updates) {
+    const list = this.getTransactions();
+    const idx = list.findIndex(t => t.id === id);
+    if (idx >= 0) { list[idx] = { ...list[idx], ...updates }; this.set('transactions', list); }
+  },
+  deleteTransaction(id) {
+    const list = this.getTransactions().filter(t => t.id !== id);
+    this.set('transactions', list);
+  },
+
+  // 分类
+  getCategories() { return this.get('categories', []); },
+  addCategory(cat) {
+    const list = this.getCategories();
+    cat.id = cat.id || this.uid();
+    list.push(cat);
+    this.set('categories', list);
+    return cat;
+  },
+  updateCategory(id, updates) {
+    const list = this.getCategories();
+    const idx = list.findIndex(c => c.id === id);
+    if (idx >= 0) { list[idx] = { ...list[idx], ...updates }; this.set('categories', list); }
+  },
+  deleteCategory(id) {
+    let list = this.getCategories().filter(c => c.id !== id);
+    // 删除子分类
+    list = list.filter(c => c.parentId !== id);
+    this.set('categories', list);
+  },
+
+  // 账户
+  getAccounts() { return this.get('accounts', []); },
+  addAccount(acc) {
+    const list = this.getAccounts();
+    acc.id = acc.id || this.uid();
+    list.push(acc);
+    this.set('accounts', list);
+    return acc;
+  },
+  updateAccount(id, updates) {
+    const list = this.getAccounts();
+    const idx = list.findIndex(a => a.id === id);
+    if (idx >= 0) { list[idx] = { ...list[idx], ...updates }; this.set('accounts', list); }
+  },
+  deleteAccount(id) {
+    const list = this.getAccounts().filter(a => a.id !== id);
+    this.set('accounts', list);
+  },
+  getAccountBalance(accountId) {
+    const acc = this.getAccounts().find(a => a.id === accountId);
+    if (!acc) return 0;
+    let balance = acc.initialBalance || 0;
+    const txs = this.getTransactions();
+    txs.forEach(t => {
+      if (t.type === 'income' && t.accountId === accountId) balance += t.amount;
+      else if (t.type === 'expense' && t.accountId === accountId) balance -= t.amount;
+      else if (t.type === 'transfer') {
+        if (t.toAccountId === accountId) balance += t.amount;
+        if (t.accountId === accountId) balance -= t.amount;
+      }
+    });
+    return balance;
+  },
+
+  // 预算
+  getBudgets() { return this.get('budgets', []); },
+  setBudget(month, total, categoryBudgets) {
+    let list = this.getBudgets();
+    let b = list.find(x => x.month === month);
+    if (b) {
+      b.total = total;
+      b.categories = categoryBudgets;
+    } else {
+      b = { id: this.uid(), month, total, categories: categoryBudgets };
+      list.push(b);
+    }
+    this.set('budgets', list);
+  },
+  getBudget(month) {
+    return this.getBudgets().find(b => b.month === month);
+  },
+
+  // 清空
+  clearAll() {
+    ['transactions','categories','accounts','budgets'].forEach(t => {
+      localStorage.removeItem(this._prefix + t);
+    });
+  },
+
+  // 导出
+  exportData() {
+    return {
+      transactions: this.getTransactions(),
+      categories: this.getCategories(),
+      accounts: this.getAccounts(),
+      budgets: this.getBudgets(),
+    };
+  },
+
+  importData(data) {
+    if (data.transactions) this.set('transactions', data.transactions);
+    if (data.categories) this.set('categories', data.categories);
+    if (data.accounts) this.set('accounts', data.accounts);
+    if (data.budgets) this.set('budgets', data.budgets);
+  }
+};
+
+/* ---- 个人记账种子数据 ---- */
+const PersonalSeed = {
+  init() {
+    if (localStorage.getItem('hxx_personal_initialized')) return;
+
+    // 默认支出分类
+    const expenseCats = [
+      { name: '餐饮', icon: '🍔', color: '#FF6B6B', type: 'expense', parentId: null, sort: 1 },
+      { name: '交通', icon: '🚌', color: '#4ECDC4', type: 'expense', parentId: null, sort: 2 },
+      { name: '购物', icon: '🛍️', color: '#45B7D1', type: 'expense', parentId: null, sort: 3 },
+      { name: '住房', icon: '🏠', color: '#FFA07A', type: 'expense', parentId: null, sort: 4 },
+      { name: '娱乐', icon: '🎮', color: '#98D8C8', type: 'expense', parentId: null, sort: 5 },
+      { name: '医疗', icon: '💊', color: '#F7DC6F', type: 'expense', parentId: null, sort: 6 },
+      { name: '教育', icon: '📚', color: '#BB8FCE', type: 'expense', parentId: null, sort: 7 },
+      { name: '人情', icon: '🎁', color: '#85C1E2', type: 'expense', parentId: null, sort: 8 },
+      { name: '通讯', icon: '📱', color: '#F8B739', type: 'expense', parentId: null, sort: 9 },
+      { name: '日用', icon: '🧴', color: '#52BE80', type: 'expense', parentId: null, sort: 10 },
+    ];
+    expenseCats.forEach(c => PersonalDB.addCategory(c));
+
+    // 默认收入分类
+    const incomeCats = [
+      { name: '工资', icon: '💰', color: '#2ECC71', type: 'income', parentId: null, sort: 1 },
+      { name: '门店利润', icon: '🏪', color: '#E74C3C', type: 'income', parentId: null, sort: 2 },
+      { name: '兼职', icon: '💼', color: '#3498DB', type: 'income', parentId: null, sort: 3 },
+      { name: '投资', icon: '📈', color: '#F39C12', type: 'income', parentId: null, sort: 4 },
+      { name: '红包', icon: '🧧', color: '#E91E63', type: 'income', parentId: null, sort: 5 },
+      { name: '退款', icon: '↩️', color: '#9B59B6', type: 'income', parentId: null, sort: 6 },
+    ];
+    incomeCats.forEach(c => PersonalDB.addCategory(c));
+
+    // 默认账户
+    const accounts = [
+      { name: '微信', type: 'wechat', icon: '💬', color: '#07C160', initialBalance: 0, billingDay: null, repaymentDay: null },
+      { name: '支付宝', type: 'alipay', icon: '💙', color: '#1677FF', initialBalance: 0, billingDay: null, repaymentDay: null },
+      { name: '银行卡', type: 'bank', icon: '🏦', color: '#FFA726', initialBalance: 0, billingDay: null, repaymentDay: null },
+      { name: '现金', type: 'cash', icon: '💵', color: '#66BB6A', initialBalance: 0, billingDay: null, repaymentDay: null },
+    ];
+    accounts.forEach(a => PersonalDB.addAccount(a));
+
+    localStorage.setItem('hxx_personal_initialized', '1');
+  }
+};
+
+/* ---- 个人记账统计 ---- */
+const PersonalStats = {
+  // 月度统计
+  monthSummary(year, month) {
+    const txs = PersonalDB.getTransactions();
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const monthTxs = txs.filter(t => t.date && t.date.startsWith(prefix));
+
+    let income = 0, expense = 0;
+    const expByCat = {}, incByCat = {};
+    const dailyExp = {};
+
+    monthTxs.forEach(t => {
+      if (t.type === 'income') {
+        income += t.amount;
+        incByCat[t.categoryId] = (incByCat[t.categoryId] || 0) + t.amount;
+      } else if (t.type === 'expense') {
+        expense += t.amount;
+        expByCat[t.categoryId] = (expByCat[t.categoryId] || 0) + t.amount;
+        const day = t.date.slice(8, 10);
+        dailyExp[day] = (dailyExp[day] || 0) + t.amount;
+      }
+    });
+
+    return { income, expense, balance: income - expense, expByCat, incByCat, dailyExp, count: monthTxs.length };
+  },
+
+  // 上月统计（用于环比）
+  lastMonthSummary() {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return this.monthSummary(d.getFullYear(), d.getMonth());
+  },
+
+  // 分类排行
+  topCategories(catMap, limit) {
+    const cats = PersonalDB.getCategories();
+    const arr = Object.entries(catMap).map(([id, amount]) => {
+      const cat = cats.find(c => c.id == id);
+      return { id, name: cat ? cat.name : '未分类', icon: cat ? cat.icon : '📌', color: cat ? cat.color : '#999', amount };
+    });
+    arr.sort((a, b) => b.amount - a.amount);
+    return arr.slice(0, limit || 10);
+  },
+
+  // 最大单笔支出
+  maxExpense(year, month) {
+    const txs = PersonalDB.getTransactions();
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const expenses = txs.filter(t => t.type === 'expense' && t.date && t.date.startsWith(prefix));
+    if (!expenses.length) return null;
+    return expenses.reduce((max, t) => t.amount > max.amount ? t : max);
+  },
+
+  // 高频消费分类
+  frequentCategories(year, month) {
+    const txs = PersonalDB.getTransactions();
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const monthTxs = txs.filter(t => t.type === 'expense' && t.date && t.date.startsWith(prefix));
+    const count = {};
+    monthTxs.forEach(t => { count[t.categoryId] = (count[t.categoryId] || 0) + 1; });
+    const cats = PersonalDB.getCategories();
+    const arr = Object.entries(count).map(([id, cnt]) => {
+      const cat = cats.find(c => c.id == id);
+      return { name: cat ? cat.name : '未分类', icon: cat ? cat.icon : '📌', count: cnt };
+    });
+    arr.sort((a, b) => b.count - a.count);
+    return arr.slice(0, 5);
+  },
+
+  // 趋势数据（最近N天）
+  dailyTrend(days) {
+    const txs = PersonalDB.getTransactions();
+    const result = [];
+    const now = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = Utils.formatDate(d);
+      const dayExp = txs.filter(t => t.type === 'expense' && t.date === dateStr).reduce((s, t) => s + t.amount, 0);
+      const dayInc = txs.filter(t => t.type === 'income' && t.date === dateStr).reduce((s, t) => s + t.amount, 0);
+      result.push({ date: dateStr.slice(5), expense: dayExp, income: dayInc });
+    }
+    return result;
+  },
+
+  // 月度趋势（最近N月）
+  monthlyTrend(months) {
+    const result = [];
+    const now = new Date();
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const s = this.monthSummary(d.getFullYear(), d.getMonth());
+      result.push({ month: `${d.getMonth() + 1}月`, expense: s.expense, income: s.income });
+    }
+    return result;
+  }
+};
+
+/* ---- 门店数据打通：读取门店利润 ---- */
+const StoreBridge = {
+  // 获取门店某月每日净利润
+  getStoreDailyProfit(year, month) {
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const sales = DB.get('dailySales', []);
+    const expenses = DB.get('expenses', []);
+    const incomes = DB.get('incomes', []);
+
+    const result = {};
+    const days = new Date(year, month + 1, 0).getDate();
+    for (let d = 1; d <= days; d++) {
+      const dateStr = `${prefix}-${String(d).padStart(2, '0')}`;
+      const daySales = sales.filter(s => s.date === dateStr).reduce((sum, s) => sum + (s.totalAmount || s.amount || 0), 0);
+      const dayExp = expenses.filter(e => e.date === dateStr).reduce((sum, e) => sum + (e.amount || 0), 0);
+      const dayInc = incomes.filter(i => i.date === dateStr).reduce((sum, i) => sum + (i.amount || 0), 0);
+      if (daySales > 0 || dayExp > 0 || dayInc > 0) {
+        result[dateStr] = { sales: daySales, expenses: dayExp, otherIncome: dayInc, profit: daySales + dayInc - dayExp };
+      }
+    }
+    return result;
+  },
+
+  // 同步门店利润到个人记账
+  syncToPersonal(year, month) {
+    const profits = this.getStoreDailyProfit(year, month);
+    const txs = PersonalDB.getTransactions();
+    const storeCat = PersonalDB.getCategories().find(c => c.name === '门店利润' && c.type === 'income');
+    if (!storeCat) return { synced: 0, skipped: 0 };
+
+    let synced = 0, skipped = 0;
+    Object.entries(profits).forEach(([dateStr, data]) => {
+      // 检查是否已同步过
+      const exists = txs.some(t => t.date === dateStr && t.categoryId == storeCat.id && t.remark === '门店利润自动同步');
+      if (exists) { skipped++; return; }
+      if (data.profit === 0) { skipped++; return; }
+
+      PersonalDB.addTransaction({
+        type: 'income',
+        amount: data.profit,
+        categoryId: storeCat.id,
+        date: dateStr,
+        accountId: null,
+        remark: '门店利润自动同步',
+        storeData: data,
+      });
+      synced++;
+    });
+
+    return { synced, skipped };
+  }
+};
+
+/* ===== 个人记账页面 ===== */
+var Pages = Pages || {};
+
+/* -- 个人概览 -- */
+Pages.personalDashboard = function(container) {
+  const now = new Date();
+  const summary = PersonalStats.monthSummary(now.getFullYear(), now.getMonth());
+  const lastMonth = PersonalStats.lastMonthSummary();
+  const budget = PersonalDB.getBudget(Utils.formatDate(now).slice(0, 7));
+  const recentTxs = PersonalDB.getTransactions().slice(0, 8);
+  const cats = PersonalDB.getCategories();
+
+  const expChange = lastMonth.expense > 0 ? ((summary.expense - lastMonth.expense) / lastMonth.expense * 100).toFixed(1) : 0;
+  const incChange = lastMonth.income > 0 ? ((summary.income - lastMonth.income) / lastMonth.income * 100).toFixed(1) : 0;
+  const budgetUsed = budget ? summary.expense : 0;
+  const budgetTotal = budget ? budget.total : 0;
+  const budgetPct = budgetTotal > 0 ? (budgetUsed / budgetTotal * 100).toFixed(1) : 0;
+  const budgetRemaining = budgetTotal - budgetUsed;
+
+  const trendData = PersonalStats.dailyTrend(7);
+
+  container.innerHTML = `
+    <div class="quick-actions" style="margin-bottom:12px;">
+      <button class="quick-action" onclick="App.navigate('personalAdd')" style="background:var(--primary-light);color:var(--primary);">
+        ➕ 记一笔
+      </button>
+      <button class="quick-action" onclick="App.navigate('personalTransactions')" style="background:var(--blue-light);color:var(--blue);">
+        📋 看账单
+      </button>
+      <button class="quick-action" onclick="App.navigate('personalReports')" style="background:var(--purple-light);color:var(--purple);">
+        📊 报表
+      </button>
+      <button class="quick-action" onclick="PersonalUI.syncStore()" style="background:var(--green-light);color:var(--green);">
+        🏪 同步门店
+      </button>
+    </div>
+
+    <div class="hero-section" style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px;">
+      <div class="hero-card" style="padding:14px;border-radius:var(--radius);">
+        <div class="hero-icon" style="background:var(--green-light);color:var(--green);">💰</div>
+        <div class="hero-label">本月收入</div>
+        <div class="hero-value" style="color:var(--green);">¥${Utils.money(summary.income)}</div>
+        <div class="hero-sub ${incChange >= 0 ? 'up' : 'down'}">${incChange >= 0 ? '↑' : '↓'} ${Math.abs(incChange)}% 环比</div>
+      </div>
+      <div class="hero-card" style="padding:14px;border-radius:var(--radius);">
+        <div class="hero-icon" style="background:var(--red-light);color:var(--red);">💸</div>
+        <div class="hero-label">本月支出</div>
+        <div class="hero-value" style="color:var(--red);">¥${Utils.money(summary.expense)}</div>
+        <div class="hero-sub ${expChange >= 0 ? 'down' : 'up'}">${expChange >= 0 ? '↑' : '↓'} ${Math.abs(expChange)}% 环比</div>
+      </div>
+      <div class="hero-card" style="padding:14px;border-radius:var(--radius);">
+        <div class="hero-icon" style="background:var(--blue-light);color:var(--blue);">📊</div>
+        <div class="hero-label">本月结余</div>
+        <div class="hero-value" style="color:${summary.balance >= 0 ? 'var(--blue)' : 'var(--red)'};">¥${Utils.money(summary.balance)}</div>
+        <div class="hero-sub">${summary.count} 笔记录</div>
+      </div>
+      <div class="hero-card" style="padding:14px;border-radius:var(--radius);">
+        <div class="hero-icon" style="background:${budgetPct > 100 ? 'var(--red-light)' : budgetPct > 80 ? 'var(--orange-light)' : 'var(--green-light)'};color:${budgetPct > 100 ? 'var(--red)' : budgetPct > 80 ? 'var(--orange)' : 'var(--green)'};">🎯</div>
+        <div class="hero-label">预算剩余</div>
+        <div class="hero-value" style="color:${budgetPct > 100 ? 'var(--red)' : 'var(--text)'};">${budget ? '¥' + Utils.money(budgetRemaining) : '未设置'}</div>
+        <div class="hero-sub">${budget ? `已用 ${budgetPct}%` : '点击设置预算'}</div>
+      </div>
+    </div>
+
+    ${budget ? `
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">📊 预算进度</div></div>
+      <div style="padding:0 16px 16px;">
+        <div class="pf-progress-bar">
+          <div class="pf-progress-fill ${budgetPct > 100 ? 'over' : budgetPct > 80 ? 'warn' : ''}" style="width:${Math.min(budgetPct, 100)}%"></div>
+        </div>
+        <div class="flex-between" style="margin-top:6px;font-size:12px;color:var(--text-secondary);">
+          <span>已花 ¥${Utils.money(budgetUsed)} / ¥${Utils.money(budgetTotal)}</span>
+          <span style="color:${budgetPct > 100 ? 'var(--red)' : budgetPct > 80 ? 'var(--orange)' : 'var(--green)'};font-weight:600;">${budgetPct}%</span>
+        </div>
+        ${budgetPct > 100 ? '<div style="margin-top:8px;color:var(--red);font-size:12px;">⚠️ 已超出预算 ¥' + Utils.money(budgetUsed - budgetTotal) + '</div>' : ''}
+      </div>
+    </div>` : ''}
+
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">📈 近7天趋势</div></div>
+      <div style="padding:8px 16px 16px;">
+        <canvas id="pfTrendChart" style="width:100%;height:160px;"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">最近账目</div>
+        <button class="btn btn-default btn-sm" onclick="App.navigate('personalTransactions')">全部 →</button>
+      </div>
+      <div id="pfRecentList">
+        ${recentTxs.length === 0 ? '<div class="empty-state"><div class="empty-icon">📝</div><div class="empty-text">还没有记录，点击「记一笔」开始</div></div>' :
+          recentTxs.map(t => PersonalUI.renderTxItem(t, cats)).join('')}
+      </div>
+    </div>
+  `;
+
+  // 趋势图
+  setTimeout(() => {
+    const ctx = document.getElementById('pfTrendChart');
+    if (!ctx) return;
+    const labels = trendData.map(d => d.date);
+    const expData = trendData.map(d => d.expense);
+    const incData = trendData.map(d => d.income);
+
+    App.chartInstances.pfTrend = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: '支出', data: expData, borderColor: '#EF4444', backgroundColor: 'rgba(239,68,68,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+          { label: '收入', data: incData, borderColor: '#10B981', backgroundColor: 'rgba(16,185,129,0.1)', fill: true, tension: 0.3, pointRadius: 2 },
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: true, bottom: 0, labels: { font: { size: 10 } } } },
+        scales: {
+          x: { ticks: { font: { size: 9 } }, grid: { display: false } },
+          y: { ticks: { font: { size: 9 }, callback: v => v >= 1000 ? (v/1000)+'k' : v }, grid: { color: 'rgba(0,0,0,0.05)' } }
+        }
+      }
+    });
+  }, 50);
+};
+
+/* -- 记一笔 -- */
+Pages.personalAdd = function(container) {
+  const cats = PersonalDB.getCategories();
+  const accounts = PersonalDB.getAccounts();
+  const expCats = cats.filter(c => c.type === 'expense');
+  const incCats = cats.filter(c => c.type === 'income');
+
+  container.innerHTML = `
+    <div class="pf-add-container">
+      <!-- 类型切换 -->
+      <div class="pf-type-tabs">
+        <button class="pf-type-tab active" data-type="expense" onclick="PersonalUI.switchType('expense')">💸 支出</button>
+        <button class="pf-type-tab" data-type="income" onclick="PersonalUI.switchType('income')">💰 收入</button>
+        <button class="pf-type-tab" data-type="transfer" onclick="PersonalUI.switchType('transfer')">🔄 转账</button>
+      </div>
+
+      <!-- 金额显示 -->
+      <div class="pf-amount-display">
+        <span class="pf-amount-currency">¥</span>
+        <span class="pf-amount-value" id="pfAmountDisplay">0</span>
+      </div>
+
+      <!-- 分类选择 (expense/income) -->
+      <div id="pfCategorySection">
+        <div class="pf-section-label">选择分类</div>
+        <div class="pf-category-grid" id="pfCategoryGrid">
+          ${expCats.map(c => `
+            <div class="pf-category-item" data-cat-id="${c.id}" onclick="PersonalUI.selectCategory(${c.id})">
+              <div class="pf-cat-icon" style="background:${c.color}20;color:${c.color};">${c.icon}</div>
+              <span>${c.name}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- 转账选择 -->
+      <div id="pfTransferSection" style="display:none;">
+        <div class="pf-section-label">转账账户</div>
+        <div class="pf-form-row">
+          <select class="form-control" id="pfFromAccount">
+            <option value="">转出账户</option>
+            ${accounts.map(a => `<option value="${a.id}">${a.icon} ${a.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="pf-form-row">
+          <select class="form-control" id="pfToAccount">
+            <option value="">转入账户</option>
+            ${accounts.map(a => `<option value="${a.id}">${a.icon} ${a.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <!-- 账户/日期/备注 -->
+      <div class="pf-form-section">
+        <div class="pf-form-row">
+          <select class="form-control" id="pfAccount">
+            <option value="">选择账户</option>
+            ${accounts.map(a => `<option value="${a.id}">${a.icon} ${a.name} (¥${Utils.money(PersonalDB.getAccountBalance(a.id))})</option>`).join('')}
+          </select>
+        </div>
+        <div class="pf-form-row">
+          <div class="pf-date-shortcuts">
+            <button class="pf-date-btn" onclick="PersonalUI.setDate('today')">今天</button>
+            <button class="pf-date-btn" onclick="PersonalUI.setDate('yesterday')">昨天</button>
+            <button class="pf-date-btn" onclick="PersonalUI.setDate('dayBefore')">前天</button>
+          </div>
+          <input type="date" class="form-control" id="pfDate" value="${Utils.today()}" style="flex:1;">
+        </div>
+        <div class="pf-form-row">
+          <input type="text" class="form-control" id="pfRemark" placeholder="备注（可选）" maxlength="100">
+        </div>
+      </div>
+
+      <!-- 金额键盘 -->
+      <div class="pf-keypad">
+        <button class="pf-key" onclick="PersonalUI.inputAmount('1')">1</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('2')">2</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('3')">3</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('4')">4</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('5')">5</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('6')">6</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('7')">7</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('8')">8</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('9')">9</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('.')">.</button>
+        <button class="pf-key" onclick="PersonalUI.inputAmount('0')">0</button>
+        <button class="pf-key pf-key-del" onclick="PersonalUI.deleteAmount()">⌫</button>
+      </div>
+
+      <!-- 保存按钮 -->
+      <button class="btn btn-primary btn-block btn-lg pf-save-btn" onclick="PersonalUI.saveTransaction()">
+        💾 保存
+      </button>
+    </div>
+  `;
+};
+
+/* -- 账单列表 -- */
+Pages.personalTransactions = function(container) {
+  const cats = PersonalDB.getCategories();
+  const accounts = PersonalDB.getAccounts();
+
+  container.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <input type="text" class="form-control" id="pfSearchInput" placeholder="🔍 搜索备注、分类..." oninput="PersonalUI.filterTransactions()" style="margin-bottom:8px;">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <select class="form-control" id="pfFilterType" onchange="PersonalUI.filterTransactions()" style="flex:1;min-width:80px;">
+          <option value="">全部类型</option>
+          <option value="expense">支出</option>
+          <option value="income">收入</option>
+          <option value="transfer">转账</option>
+        </select>
+        <select class="form-control" id="pfFilterCat" onchange="PersonalUI.filterTransactions()" style="flex:1;min-width:80px;">
+          <option value="">全部分类</option>
+          ${cats.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}
+        </select>
+        <select class="form-control" id="pfFilterMonth" onchange="PersonalUI.filterTransactions()" style="flex:1;min-width:80px;">
+          <option value="">全部时间</option>
+          ${PersonalUI.getMonthOptions()}
+        </select>
+      </div>
+    </div>
+    <div id="pfTxList"></div>
+  `;
+
+  PersonalUI.filterTransactions();
+};
+
+/* -- 报表 -- */
+Pages.personalReports = function(container) {
+  const now = new Date();
+  const summary = PersonalStats.monthSummary(now.getFullYear(), now.getMonth());
+  const lastMonth = PersonalStats.lastMonthSummary();
+  const topExp = PersonalStats.topCategories(summary.expByCat, 6);
+  const topInc = PersonalStats.topCategories(summary.incByCat, 6);
+  const maxExp = PersonalStats.maxExpense(now.getFullYear(), now.getMonth());
+  const freqCats = PersonalStats.frequentCategories(now.getFullYear(), now.getMonth());
+  const monthTrend = PersonalStats.monthlyTrend(6);
+  const cats = PersonalDB.getCategories();
+
+  const expMoM = lastMonth.expense > 0 ? ((summary.expense - lastMonth.expense) / lastMonth.expense * 100).toFixed(1) : '-';
+  const incMoM = lastMonth.income > 0 ? ((summary.income - lastMonth.income) / lastMonth.income * 100).toFixed(1) : '-';
+
+  container.innerHTML = `
+    <div class="hero-section" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+      <div class="hero-card" style="padding:12px;text-align:center;">
+        <div class="hero-label" style="font-size:11px;">本月收入</div>
+        <div style="font-size:16px;font-weight:700;color:var(--green);">¥${Utils.money(summary.income)}</div>
+        <div style="font-size:10px;color:var(--text-muted);">环比 ${incMoM}%</div>
+      </div>
+      <div class="hero-card" style="padding:12px;text-align:center;">
+        <div class="hero-label" style="font-size:11px;">本月支出</div>
+        <div style="font-size:16px;font-weight:700;color:var(--red);">¥${Utils.money(summary.expense)}</div>
+        <div style="font-size:10px;color:var(--text-muted);">环比 ${expMoM}%</div>
+      </div>
+      <div class="hero-card" style="padding:12px;text-align:center;">
+        <div class="hero-label" style="font-size:11px;">本月结余</div>
+        <div style="font-size:16px;font-weight:700;color:${summary.balance >= 0 ? 'var(--blue)' : 'var(--red)'};">¥${Utils.money(summary.balance)}</div>
+        <div style="font-size:10px;color:var(--text-muted);">${summary.count}笔</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">🥧 支出分类占比</div></div>
+      <div style="padding:8px 16px 16px;">
+        ${topExp.length > 0 ? '<canvas id="pfPieChart" style="width:100%;height:200px;"></canvas>' : '<div class="empty-state"><div class="empty-text">暂无支出数据</div></div>'}
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">📈 月度趋势</div></div>
+      <div style="padding:8px 16px 16px;">
+        <canvas id="pfMonthChart" style="width:100%;height:180px;"></canvas>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">🏆 支出排行</div></div>
+      <div style="padding:8px 16px 16px;">
+        ${topExp.length > 0 ? topExp.map((c, i) => `
+          <div class="flex-between" style="padding:6px 0;border-bottom:1px solid var(--border-light);">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:16px;">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1)}</span>
+              <span style="font-size:18px;">${c.icon}</span>
+              <span>${c.name}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-weight:600;color:var(--red);">¥${Utils.money(c.amount)}</span>
+              <span style="font-size:11px;color:var(--text-muted);">${summary.expense > 0 ? (c.amount/summary.expense*100).toFixed(0) : 0}%</span>
+            </div>
+          </div>
+        `).join('') : '<div class="empty-state"><div class="empty-text">暂无数据</div></div>'}
+      </div>
+    </div>
+
+    ${maxExp ? `
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">💸 最大单笔支出</div></div>
+      <div style="padding:12px 16px;">
+        <div class="flex-between">
+          <div>
+            <span style="font-size:20px;">${(cats.find(c=>c.id==maxExp.categoryId)||{}).icon || '💸'}</span>
+            <span style="font-weight:600;">${(cats.find(c=>c.id==maxExp.categoryId)||{}).name || '未知'}</span>
+            ${maxExp.remark ? `<span style="color:var(--text-muted);font-size:12px;"> · ${maxExp.remark}</span>` : ''}
+          </div>
+          <span style="font-size:18px;font-weight:700;color:var(--red);">¥${Utils.money(maxExp.amount)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${maxExp.date}</div>
+      </div>
+    </div>` : ''}
+
+    ${freqCats.length > 0 ? `
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">🔥 高频消费</div></div>
+      <div style="padding:8px 16px 16px;">
+        ${freqCats.map(c => `
+          <div class="flex-between" style="padding:6px 0;">
+            <div><span style="font-size:16px;">${c.icon}</span> ${c.name}</div>
+            <span class="badge badge-info">${c.count}次</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>` : ''}
+
+    <div style="padding:8px 0;">
+      <button class="btn btn-default btn-block" onclick="PersonalUI.exportCSV()">📥 导出 CSV</button>
+    </div>
+  `;
+
+  // 饼图
+  setTimeout(() => {
+    if (topExp.length > 0) {
+      const ctx = document.getElementById('pfPieChart');
+      if (ctx) {
+        App.chartInstances.pfPie = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: topExp.map(c => c.name),
+            datasets: [{
+              data: topExp.map(c => c.amount),
+              backgroundColor: topExp.map(c => c.color),
+              borderWidth: 2,
+              borderColor: '#fff'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'right', labels: { font: { size: 10 }, padding: 8 } },
+              tooltip: { callbacks: { label: ctx => ctx.label + ': ¥' + Utils.money(ctx.parsed) } }
+            }
+          }
+        });
+      }
+    }
+
+    // 月度趋势
+    const mCtx = document.getElementById('pfMonthChart');
+    if (mCtx) {
+      App.chartInstances.pfMonth = new Chart(mCtx, {
+        type: 'bar',
+        data: {
+          labels: monthTrend.map(m => m.month),
+          datasets: [
+            { label: '收入', data: monthTrend.map(m => m.income), backgroundColor: '#10B981', borderRadius: 4 },
+            { label: '支出', data: monthTrend.map(m => m.expense), backgroundColor: '#EF4444', borderRadius: 4 },
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { labels: { font: { size: 10 } } } },
+          scales: {
+            x: { ticks: { font: { size: 9 } }, grid: { display: false } },
+            y: { ticks: { font: { size: 9 }, callback: v => v >= 1000 ? (v/1000)+'k' : v }, grid: { color: 'rgba(0,0,0,0.05)' } }
+          }
+        }
+      });
+    }
+  }, 50);
+};
+
+/* -- 分类管理 -- */
+Pages.personalCategories = function(container) {
+  const cats = PersonalDB.getCategories();
+  const expCats = cats.filter(c => c.type === 'expense');
+  const incCats = cats.filter(c => c.type === 'income');
+
+  container.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <button class="btn btn-primary btn-block" onclick="PersonalUI.showCatForm()">➕ 添加分类</button>
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">💸 支出分类 (${expCats.length})</div></div>
+      <div>
+        ${expCats.map(c => `
+          <div class="flex-between" style="padding:10px 16px;border-bottom:1px solid var(--border-light);">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="width:32px;height:32px;border-radius:8px;background:${c.color}20;display:flex;align-items:center;justify-content:center;font-size:16px;">${c.icon}</div>
+              <span>${c.name}</span>
+            </div>
+            <div class="gap-2">
+              <button class="btn btn-default btn-sm" onclick="PersonalUI.showCatForm(${c.id})">编辑</button>
+              <button class="btn btn-danger btn-sm" onclick="PersonalUI.deleteCat(${c.id})">删除</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">💰 收入分类 (${incCats.length})</div></div>
+      <div>
+        ${incCats.map(c => `
+          <div class="flex-between" style="padding:10px 16px;border-bottom:1px solid var(--border-light);">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div style="width:32px;height:32px;border-radius:8px;background:${c.color}20;display:flex;align-items:center;justify-content:center;font-size:16px;">${c.icon}</div>
+              <span>${c.name}</span>
+            </div>
+            <div class="gap-2">
+              <button class="btn btn-default btn-sm" onclick="PersonalUI.showCatForm(${c.id})">编辑</button>
+              <button class="btn btn-danger btn-sm" onclick="PersonalUI.deleteCat(${c.id})">删除</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+};
+
+/* -- 账户管理 -- */
+Pages.personalAccounts = function(container) {
+  const accounts = PersonalDB.getAccounts();
+
+  container.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <button class="btn btn-primary btn-block" onclick="PersonalUI.showAccForm()">➕ 添加账户</button>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">我的账户</div></div>
+      <div>
+        ${accounts.length === 0 ? '<div class="empty-state"><div class="empty-text">还没有账户</div></div>' :
+          accounts.map(a => {
+            const balance = PersonalDB.getAccountBalance(a.id);
+            return `
+              <div class="flex-between" style="padding:12px 16px;border-bottom:1px solid var(--border-light);">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <div style="width:40px;height:40px;border-radius:10px;background:${a.color}20;display:flex;align-items:center;justify-content:center;font-size:20px;">${a.icon}</div>
+                  <div>
+                    <div style="font-weight:600;">${a.name}</div>
+                    <div style="font-size:11px;color:var(--text-muted);">${PersonalUI.accTypeLabel(a.type)}${a.billingDay ? ' · 账单日' + a.billingDay + '号' : ''}</div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <div style="text-align:right;">
+                    <div style="font-weight:700;color:${balance >= 0 ? 'var(--text)' : 'var(--red)'};">¥${Utils.money(balance)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);">当前余额</div>
+                  </div>
+                  <button class="btn btn-default btn-sm" onclick="PersonalUI.showAccForm(${a.id})">编辑</button>
+                  <button class="btn btn-danger btn-sm" onclick="PersonalUI.deleteAcc(${a.id})">删除</button>
+                </div>
+              </div>
+            `;
+          }).join('')
+        }
+      </div>
+    </div>
+  `;
+};
+
+/* -- 预算设置 -- */
+Pages.personalBudget = function(container) {
+  const now = new Date();
+  const monthStr = Utils.formatDate(now).slice(0, 7);
+  const budget = PersonalDB.getBudget(monthStr);
+  const summary = PersonalStats.monthSummary(now.getFullYear(), now.getMonth());
+  const cats = PersonalDB.getCategories().filter(c => c.type === 'expense');
+  const catBudgets = budget ? (budget.categories || {}) : {};
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:12px;">
+      <div class="card-header"><div class="card-title">🎯 ${now.getFullYear()}年${now.getMonth()+1}月预算</div></div>
+      <div style="padding:16px;">
+        <div class="pf-form-row">
+          <label style="font-size:13px;color:var(--text-secondary);">月度总预算</label>
+          <input type="number" class="form-control" id="pfBudgetTotal" value="${budget ? budget.total : ''}" placeholder="例如 8000" style="font-size:18px;font-weight:600;">
+        </div>
+
+        <div style="margin:16px 0 8px;font-size:13px;color:var(--text-secondary);">分类预算（可选）</div>
+        ${cats.map(c => {
+          const used = summary.expByCat[c.id] || 0;
+          const budgeted = catBudgets[c.id] || '';
+          const pct = budgeted > 0 ? (used / budgeted * 100).toFixed(0) : 0;
+          return `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <div style="width:32px;height:32px;border-radius:8px;background:${c.color}20;display:flex;align-items:center;justify-content:center;font-size:14px;">${c.icon}</div>
+              <div style="flex:1;">
+                <div style="font-size:13px;">${c.name}</div>
+                <div style="font-size:11px;color:var(--text-muted);">已花 ¥${Utils.money(used)}${budgeted ? ' / ¥' + Utils.money(budgeted) : ''}</div>
+                ${budgeted ? `<div class="pf-progress-bar" style="height:4px;margin-top:2px;"><div class="pf-progress-fill ${pct > 100 ? 'over' : pct > 80 ? 'warn' : ''}" style="width:${Math.min(pct, 100)}%"></div></div>` : ''}
+              </div>
+              <input type="number" class="form-control" id="pfBudgetCat_${c.id}" value="${budgeted}" placeholder="0" style="width:80px;text-align:right;">
+            </div>
+          `;
+        }).join('')}
+
+        <button class="btn btn-primary btn-block btn-lg" style="margin-top:16px;" onclick="PersonalUI.saveBudget('${monthStr}')">💾 保存预算</button>
+      </div>
+    </div>
+
+    ${budget ? `
+    <div class="card">
+      <div class="card-header"><div class="card-title">📊 本月预算使用情况</div></div>
+      <div style="padding:16px;">
+        <div class="pf-progress-bar">
+          <div class="pf-progress-fill ${summary.expense / budget.total > 1 ? 'over' : summary.expense / budget.total > 0.8 ? 'warn' : ''}" style="width:${Math.min(summary.expense / budget.total * 100, 100)}%"></div>
+        </div>
+        <div class="flex-between" style="margin-top:8px;">
+          <span>已花 <strong style="color:var(--red);">¥${Utils.money(summary.expense)}</strong></span>
+          <span>剩余 <strong style="color:var(--green);">¥${Utils.money(Math.max(0, budget.total - summary.expense))}</strong></span>
+        </div>
+        <div style="margin-top:4px;font-size:12px;color:var(--text-muted);">总预算 ¥${Utils.money(budget.total)} · 使用率 ${(summary.expense / budget.total * 100).toFixed(1)}%</div>
+      </div>
+    </div>` : ''}
+  `;
+};
+
+/* ===== 个人记账 UI 交互 ===== */
+const PersonalUI = {
+  _amount: '',
+  _type: 'expense',
+  _categoryId: null,
+  _editingTxId: null,
+
+  // 类型切换
+  switchType(type) {
+    this._type = type;
+    document.querySelectorAll('.pf-type-tab').forEach(t => t.classList.toggle('active', t.dataset.type === type));
+    document.getElementById('pfCategorySection').style.display = type === 'transfer' ? 'none' : 'block';
+    document.getElementById('pfTransferSection').style.display = type === 'transfer' ? 'block' : 'none';
+
+    // 更新分类列表
+    const cats = PersonalDB.getCategories().filter(c => c.type === type);
+    const grid = document.getElementById('pfCategoryGrid');
+    if (grid) {
+      grid.innerHTML = cats.map(c => `
+        <div class="pf-category-item" data-cat-id="${c.id}" onclick="PersonalUI.selectCategory(${c.id})">
+          <div class="pf-cat-icon" style="background:${c.color}20;color:${c.color};">${c.icon}</div>
+          <span>${c.name}</span>
+        </div>
+      `).join('');
+    }
+    this._categoryId = null;
+  },
+
+  selectCategory(id) {
+    this._categoryId = id;
+    document.querySelectorAll('.pf-category-item').forEach(el => {
+      el.classList.toggle('selected', el.dataset.catId == id);
+    });
+  },
+
+  inputAmount(key) {
+    if (key === '.') {
+      if (this._amount.includes('.')) return;
+      if (!this._amount) this._amount = '0';
+    }
+    // 限制小数点后两位
+    if (this._amount.includes('.') && this._amount.split('.')[1].length >= 2) return;
+    this._amount += key;
+    document.getElementById('pfAmountDisplay').textContent = this._formatAmount(this._amount);
+  },
+
+  deleteAmount() {
+    this._amount = this._amount.slice(0, -1);
+    document.getElementById('pfAmountDisplay').textContent = this._formatAmount(this._amount) || '0';
+  },
+
+  _formatAmount(s) {
+    if (!s) return '';
+    if (s === '.') return '0.';
+    const [int, dec] = s.split('.');
+    const formatted = parseInt(int).toLocaleString('zh-CN');
+    return dec !== undefined ? formatted + '.' + dec : formatted;
+  },
+
+  setDate(preset) {
+    const now = new Date();
+    if (preset === 'yesterday') now.setDate(now.getDate() - 1);
+    else if (preset === 'dayBefore') now.setDate(now.getDate() - 2);
+    document.getElementById('pfDate').value = Utils.formatDate(now);
+  },
+
+  saveTransaction() {
+    const amount = parseFloat(this._amount);
+    if (!amount || amount <= 0) { alert('请输入金额'); return; }
+
+    const date = document.getElementById('pfDate').value;
+    const remark = document.getElementById('pfRemark').value.trim();
+
+    if (this._type !== 'transfer') {
+      if (!this._categoryId) { alert('请选择分类'); return; }
+      const accountId = document.getElementById('pfAccount').value;
+      PersonalDB.addTransaction({
+        type: this._type,
+        amount,
+        categoryId: this._categoryId,
+        date,
+        accountId: accountId ? parseInt(accountId) : null,
+        remark,
+      });
+    } else {
+      const fromId = document.getElementById('pfFromAccount').value;
+      const toId = document.getElementById('pfToAccount').value;
+      if (!fromId || !toId) { alert('请选择转出和转入账户'); return; }
+      if (fromId === toId) { alert('转出和转入账户不能相同'); return; }
+      PersonalDB.addTransaction({
+        type: 'transfer',
+        amount,
+        categoryId: null,
+        date,
+        accountId: parseInt(fromId),
+        toAccountId: parseInt(toId),
+        remark,
+      });
+    }
+
+    // 重置
+    this._amount = '';
+    this._categoryId = null;
+    alert('✅ 记账成功！');
+    App.navigate('personalDashboard');
+  },
+
+  // 账单列表筛选
+  filterTransactions() {
+    const search = (document.getElementById('pfSearchInput')?.value || '').toLowerCase();
+    const fType = document.getElementById('pfFilterType')?.value || '';
+    const fCat = document.getElementById('pfFilterCat')?.value || '';
+    const fMonth = document.getElementById('pfFilterMonth')?.value || '';
+
+    let txs = PersonalDB.getTransactions();
+    const cats = PersonalDB.getCategories();
+    const accounts = PersonalDB.getAccounts();
+
+    if (search) txs = txs.filter(t => {
+      const cat = cats.find(c => c.id == t.categoryId);
+      return (t.remark || '').toLowerCase().includes(search) || (cat && cat.name.toLowerCase().includes(search));
+    });
+    if (fType) txs = txs.filter(t => t.type === fType);
+    if (fCat) txs = txs.filter(t => t.categoryId == fCat);
+    if (fMonth) txs = txs.filter(t => t.date && t.date.startsWith(fMonth));
+
+    // 按日期分组
+    const groups = {};
+    txs.forEach(t => {
+      const d = t.date || '未知日期';
+      if (!groups[d]) groups[d] = [];
+      groups[d].push(t);
+    });
+
+    const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+
+    const listEl = document.getElementById('pfTxList');
+    if (!listEl) return;
+
+    if (txs.length === 0) {
+      listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">没有匹配的记录</div></div>';
+      return;
+    }
+
+    let html = '';
+    // 统计
+    const totalExp = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const totalInc = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    html += `<div class="card" style="margin-bottom:8px;background:var(--bg);">
+      <div style="padding:10px 16px;display:flex;justify-content:space-around;font-size:12px;">
+        <div>收入 <span style="color:var(--green);font-weight:600;">¥${Utils.money(totalInc)}</span></div>
+        <div>支出 <span style="color:var(--red);font-weight:600;">¥${Utils.money(totalExp)}</span></div>
+        <div>共 ${txs.length} 笔</div>
+      </div>
+    </div>`;
+
+    sortedDates.forEach(date => {
+      const dayTxs = groups[date];
+      const dayExp = dayTxs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+      const dayInc = dayTxs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+
+      html += `<div class="pf-date-group">${date}</div>`;
+      html += `<div class="card" style="margin-bottom:8px;"><div>`;
+      dayTxs.forEach(t => {
+        html += this.renderTxItem(t, cats, accounts, true);
+      });
+      html += `</div></div>`;
+    });
+
+    listEl.innerHTML = html;
+  },
+
+  renderTxItem(t, cats, accounts, withDelete) {
+    const cat = cats.find(c => c.id == t.categoryId) || { name: '转账', icon: '🔄', color: '#999' };
+    const isInc = t.type === 'income';
+    const isTrans = t.type === 'transfer';
+    const sign = isInc ? '+' : isTrans ? '' : '-';
+    const color = isInc ? 'var(--green)' : isTrans ? 'var(--text-secondary)' : 'var(--red)';
+
+    return `
+      <div class="pf-tx-item" ${withDelete ? `onclick="PersonalUI.showTxDetail(${t.id})"` : ''}>
+        <div class="pf-tx-icon" style="background:${cat.color}20;color:${cat.color};">${cat.icon}</div>
+        <div class="pf-tx-info">
+          <div class="pf-tx-name">${cat.name}${t.remark ? '<span style="color:var(--text-muted);font-size:12px;"> · ' + t.remark + '</span>' : ''}</div>
+          <div class="pf-tx-sub">${isTrans ? this.accName(t.accountId, accounts) + ' → ' + this.accName(t.toAccountId, accounts) : this.accName(t.accountId, accounts) || ''}</div>
+        </div>
+        <div class="pf-tx-amount" style="color:${color};">${sign}¥${Utils.money(t.amount)}</div>
+      </div>
+    `;
+  },
+
+  accName(id, accounts) {
+    if (!id || !accounts) return '';
+    const a = accounts.find(x => x.id == id);
+    return a ? a.name : '';
+  },
+
+  showTxDetail(id) {
+    const txs = PersonalDB.getTransactions();
+    const t = txs.find(x => x.id == id);
+    if (!t) return;
+    const cats = PersonalDB.getCategories();
+    const cat = cats.find(c => c.id == t.categoryId) || { name: '转账', icon: '🔄' };
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:360px;">
+        <div style="padding:20px;">
+          <div style="text-align:center;margin-bottom:16px;">
+            <div style="font-size:40px;">${cat.icon}</div>
+            <div style="font-size:24px;font-weight:700;color:${t.type === 'income' ? 'var(--green)' : 'var(--red)'};">${t.type === 'income' ? '+' : '-'}¥${Utils.money(t.amount)}</div>
+            <div style="color:var(--text-muted);font-size:13px;">${cat.name}</div>
+          </div>
+          <div style="border-top:1px solid var(--border-light);padding-top:12px;">
+            <div class="flex-between" style="margin-bottom:8px;"><span style="color:var(--text-muted);">日期</span><span>${t.date}</span></div>
+            ${t.remark ? `<div class="flex-between" style="margin-bottom:8px;"><span style="color:var(--text-muted);">备注</span><span>${t.remark}</span></div>` : ''}
+            ${t.storeData ? `<div class="flex-between" style="margin-bottom:8px;"><span style="color:var(--text-muted);">来源</span><span class="badge badge-info">门店同步</span></div>` : ''}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:16px;">
+            <button class="btn btn-danger btn-block" onclick="PersonalUI.deleteTx(${t.id})">删除</button>
+            <button class="btn btn-default btn-block" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  },
+
+  deleteTx(id) {
+    if (!confirm('确定删除这笔记录？')) return;
+    PersonalDB.deleteTransaction(id);
+    document.querySelector('.modal-overlay')?.remove();
+    App.navigate(App.currentPage);
+  },
+
+  // 门店同步
+  syncStore() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+
+    if (!confirm(`将${year}年${month+1}月的门店每日利润同步到个人记账？\n\n已同步过的日期会自动跳过。`)) return;
+
+    const result = StoreBridge.syncToPersonal(year, month);
+    alert(`同步完成！\n\n新增 ${result.synced} 笔收入记录\n跳过 ${result.skipped} 笔（已同步或利润为0）`);
+    App.navigate('personalDashboard');
+  },
+
+  // 分类表单
+  showCatForm(id) {
+    const cats = PersonalDB.getCategories();
+    const cat = id ? cats.find(c => c.id == id) : null;
+    const emojis = ['🍔','🚌','🛍️','🏠','🎮','💊','📚','🎁','📱','🧴','💰','🏪','💼','📈','🧧','↩️','🍕','☕','✈️','🐾','💻','🎵','👕','💡'];
+    const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#FFA07A','#98D8C8','#F7DC6F','#BB8FCE','#85C1E2','#F8B739','#52BE80','#2ECC71','#E74C3C','#3498DB','#F39C12','#E91E63','#9B59B6'];
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:380px;max-height:85vh;overflow-y:auto;">
+        <div style="padding:20px;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:16px;">${cat ? '编辑分类' : '添加分类'}</div>
+
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px;color:var(--text-secondary);">名称</label>
+            <input type="text" class="form-control" id="pfCatName" value="${cat ? cat.name : ''}" placeholder="分类名称" maxlength="10">
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px;color:var(--text-secondary);">类型</label>
+            <select class="form-control" id="pfCatType">
+              <option value="expense" ${cat && cat.type === 'expense' ? 'selected' : ''}>支出</option>
+              <option value="income" ${cat && cat.type === 'income' ? 'selected' : ''}>收入</option>
+            </select>
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px;color:var(--text-secondary);">图标</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              ${emojis.map(e => `<div class="pf-emoji-pick ${cat && cat.icon === e ? 'selected' : ''}" onclick="document.querySelectorAll('.pf-emoji-pick').forEach(e=>e.classList.remove('selected'));this.classList.add('selected');" data-emoji="${e}" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-size:18px;border-radius:8px;cursor:pointer;border:2px solid ${cat && cat.icon === e ? 'var(--primary)' : 'transparent'};background:${cat && cat.icon === e ? 'var(--primary-light)' : 'var(--border-light)'};">${e}</div>`).join('')}
+            </div>
+          </div>
+
+          <div style="margin-bottom:16px;">
+            <label style="font-size:12px;color:var(--text-secondary);">颜色</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              ${colors.map(c => `<div class="pf-color-pick ${cat && cat.color === c ? 'selected' : ''}" onclick="document.querySelectorAll('.pf-color-pick').forEach(e=>e.classList.remove('selected'));this.classList.add('selected');" data-color="${c}" style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:3px solid ${cat && cat.color === c ? 'var(--text)' : 'transparent'};"></div>`).join('')}
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary btn-block" onclick="PersonalUI.saveCat(${id || 'null'})">保存</button>
+            <button class="btn btn-default" onclick="this.closest('.modal-overlay').remove()">取消</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  },
+
+  saveCat(id) {
+    const name = document.getElementById('pfCatName').value.trim();
+    if (!name) { alert('请输入分类名称'); return; }
+    const type = document.getElementById('pfCatType').value;
+    const emojiEl = document.querySelector('.pf-emoji-pick.selected');
+    const colorEl = document.querySelector('.pf-color-pick.selected');
+    const icon = emojiEl ? emojiEl.dataset.emoji : '📌';
+    const color = colorEl ? colorEl.dataset.color : '#999';
+
+    if (id) {
+      PersonalDB.updateCategory(id, { name, type, icon, color });
+    } else {
+      PersonalDB.addCategory({ name, type, icon, color, parentId: null, sort: 99 });
+    }
+    document.querySelector('.modal-overlay')?.remove();
+    App.navigate('personalCategories');
+  },
+
+  deleteCat(id) {
+    if (!confirm('删除此分类？关联的账目记录会保留但显示为"未分类"。')) return;
+    PersonalDB.deleteCategory(id);
+    App.navigate('personalCategories');
+  },
+
+  // 账户表单
+  showAccForm(id) {
+    const accounts = PersonalDB.getAccounts();
+    const acc = id ? accounts.find(a => a.id == id) : null;
+    const types = [
+      { value: 'cash', label: '现金', icon: '💵' },
+      { value: 'bank', label: '银行卡', icon: '🏦' },
+      { value: 'wechat', label: '微信', icon: '💬' },
+      { value: 'alipay', label: '支付宝', icon: '💙' },
+      { value: 'credit', label: '信用卡', icon: '💳' },
+      { value: 'savings', label: '储蓄', icon: '🐷' },
+    ];
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:380px;">
+        <div style="padding:20px;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:16px;">${acc ? '编辑账户' : '添加账户'}</div>
+
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px;color:var(--text-secondary);">账户名称</label>
+            <input type="text" class="form-control" id="pfAccName" value="${acc ? acc.name : ''}" placeholder="例如 招商银行卡" maxlength="20">
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px;color:var(--text-secondary);">账户类型</label>
+            <select class="form-control" id="pfAccType">
+              ${types.map(t => `<option value="${t.value}" ${acc && acc.type === t.value ? 'selected' : ''}>${t.icon} ${t.label}</option>`).join('')}
+            </select>
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label style="font-size:12px;color:var(--text-secondary);">初始余额</label>
+            <input type="number" class="form-control" id="pfAccBalance" value="${acc ? acc.initialBalance : 0}" placeholder="0" step="0.01">
+          </div>
+
+          <div id="pfCreditFields" style="display:${acc && acc.type === 'credit' ? 'block' : 'none'};margin-bottom:12px;">
+            <div style="display:flex;gap:8px;">
+              <div style="flex:1;">
+                <label style="font-size:12px;color:var(--text-secondary);">账单日</label>
+                <input type="number" class="form-control" id="pfBillingDay" value="${acc && acc.billingDay ? acc.billingDay : ''}" placeholder="如 5" min="1" max="31">
+              </div>
+              <div style="flex:1;">
+                <label style="font-size:12px;color:var(--text-secondary);">还款日</label>
+                <input type="number" class="form-control" id="pfRepaymentDay" value="${acc && acc.repaymentDay ? acc.repaymentDay : ''}" placeholder="如 25" min="1" max="31">
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-top:16px;">
+            <button class="btn btn-primary btn-block" onclick="PersonalUI.saveAcc(${id || 'null'})">保存</button>
+            ${acc ? `<button class="btn btn-danger" onclick="PersonalUI.deleteAcc(${id});this.closest('.modal-overlay').remove();">删除</button>` : ''}
+            <button class="btn btn-default" onclick="this.closest('.modal-overlay').remove()">取消</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    // 信用卡字段显隐
+    document.getElementById('pfAccType').addEventListener('change', e => {
+      document.getElementById('pfCreditFields').style.display = e.target.value === 'credit' ? 'block' : 'none';
+    });
+  },
+
+  saveAcc(id) {
+    const name = document.getElementById('pfAccName').value.trim();
+    if (!name) { alert('请输入账户名称'); return; }
+    const type = document.getElementById('pfAccType').value;
+    const initialBalance = parseFloat(document.getElementById('pfAccBalance').value) || 0;
+    const billingDay = type === 'credit' ? parseInt(document.getElementById('pfBillingDay').value) || null : null;
+    const repaymentDay = type === 'credit' ? parseInt(document.getElementById('pfRepaymentDay').value) || null : null;
+
+    const typeIcons = { cash: '💵', bank: '🏦', wechat: '💬', alipay: '💙', credit: '💳', savings: '🐷' };
+    const typeColors = { cash: '#66BB6A', bank: '#FFA726', wechat: '#07C160', alipay: '#1677FF', credit: '#EF5350', savings: '#FFB74D' };
+
+    if (id) {
+      PersonalDB.updateAccount(id, { name, type, initialBalance, billingDay, repaymentDay });
+    } else {
+      PersonalDB.addAccount({ name, type, initialBalance, billingDay, repaymentDay, icon: typeIcons[type] || '💰', color: typeColors[type] || '#999' });
+    }
+    document.querySelector('.modal-overlay')?.remove();
+    App.navigate('personalAccounts');
+  },
+
+  deleteAcc(id) {
+    if (!confirm('删除此账户？关联的账目记录会保留。')) return;
+    PersonalDB.deleteAccount(id);
+    App.navigate('personalAccounts');
+  },
+
+  accTypeLabel(type) {
+    const map = { cash: '现金', bank: '银行卡', wechat: '微信', alipay: '支付宝', credit: '信用卡', savings: '储蓄' };
+    return map[type] || type;
+  },
+
+  // 预算保存
+  saveBudget(monthStr) {
+    const total = parseFloat(document.getElementById('pfBudgetTotal').value) || 0;
+    if (total <= 0) { alert('请输入月度总预算'); return; }
+
+    const cats = PersonalDB.getCategories().filter(c => c.type === 'expense');
+    const catBudgets = {};
+    cats.forEach(c => {
+      const val = parseFloat(document.getElementById(`pfBudgetCat_${c.id}`)?.value) || 0;
+      if (val > 0) catBudgets[c.id] = val;
+    });
+
+    PersonalDB.setBudget(monthStr, total, catBudgets);
+    alert('✅ 预算已保存！');
+    App.navigate('personalBudget');
+  },
+
+  // 月份选项
+  getMonthOptions() {
+    const now = new Date();
+    const options = [];
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      options.push(`<option value="${val}">${d.getFullYear()}年${d.getMonth() + 1}月</option>`);
+    }
+    return options.join('');
+  },
+
+  // 导出 CSV
+  exportCSV() {
+    const txs = PersonalDB.getTransactions();
+    const cats = PersonalDB.getCategories();
+    const accounts = PersonalDB.getAccounts();
+
+    if (txs.length === 0) { alert('暂无数据可导出'); return; }
+
+    let csv = '\uFEFF日期,类型,分类,金额,账户,备注\n';
+    txs.forEach(t => {
+      const cat = cats.find(c => c.id == t.categoryId);
+      const acc = accounts.find(a => a.id == t.accountId);
+      const typeMap = { expense: '支出', income: '收入', transfer: '转账' };
+      csv += `${t.date},${typeMap[t.type] || t.type},${cat ? cat.name : ''},${t.amount},${acc ? acc.name : ''},${t.remark || ''}\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `个人记账_${Utils.today()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+};
+
+  </script>
+  <script>
     // 注册 Service Worker（离线缓存 + 手机桌面安装）
     if ('serviceWorker' in navigator) {
       /* SW disabled for standalone mode */
@@ -6633,6 +8060,9 @@ const AlertCenter = {
         SeedData.generate();
         localStorage.setItem('hxx_mis_hasVisited', '1');
       }
+
+      // 初始化个人记账种子数据
+      PersonalSeed.init();
 
       // 尝试从云端拉取最新数据
       CloudSync.autoPull().then(pulled => {
